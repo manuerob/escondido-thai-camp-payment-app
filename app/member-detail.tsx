@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import type { Member, Subscription, Payment, SubscriptionStatus } from '../types/database';
 
@@ -30,9 +30,12 @@ export default function MemberDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadMemberData();
-  }, [memberId]);
+  // Load member data when screen comes into focus or member ID changes
+  useFocusEffect(
+    React.useCallback(() => {
+      loadMemberData();
+    }, [memberId])
+  );
 
   const loadMemberData = async () => {
     try {

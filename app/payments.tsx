@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import type { PaymentWithDetails, PaymentStatus, PaymentMethod } from '../types/database';
 
@@ -28,9 +29,12 @@ export default function PaymentsScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [total, setTotal] = useState(0);
 
-  useEffect(() => {
-    loadPayments();
-  }, [dateFilter, statusFilter]);
+  // Load payments when screen comes into focus or filters change
+  useFocusEffect(
+    React.useCallback(() => {
+      loadPayments();
+    }, [dateFilter, statusFilter])
+  );
 
   const loadPayments = async () => {
     try {

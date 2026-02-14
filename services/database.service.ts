@@ -959,6 +959,57 @@ class DatabaseService {
     };
   }
 
+  // ============================================
+  // FINANCE STATS METHODS
+  // ============================================
+
+  async getFinanceStats(): Promise<{
+    todayRevenue: number;
+    monthlyRevenue: number;
+    monthlyExpenses: number;
+    netProfit: number;
+  }> {
+    const db = await this.getDatabase();
+
+    // Today's revenue (completed payments only)
+    const todayResult = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) as total
+       FROM payments
+       WHERE DATE(payment_date) = DATE('now')
+       AND status = 'completed'
+       AND deleted_at IS NULL`
+    );
+
+    // Monthly revenue (completed payments only)
+    const monthlyRevenueResult = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) as total
+       FROM payments
+       WHERE strftime('%Y-%m', payment_date) = strftime('%Y-%m', 'now')
+       AND status = 'completed'
+       AND deleted_at IS NULL`
+    );
+
+    // Monthly expenses
+    const monthlyExpensesResult = await db.getFirstAsync<{ total: number }>(
+      `SELECT COALESCE(SUM(amount), 0) as total
+       FROM expenses
+       WHERE strftime('%Y-%m', expense_date) = strftime('%Y-%m', 'now')
+       AND deleted_at IS NULL`
+    );
+
+    const todayRevenue = todayResult?.total || 0;
+    const monthlyRevenue = monthlyRevenueResult?.total || 0;
+    const monthlyExpenses = monthlyExpensesResult?.total || 0;
+    const netProfit = monthlyRevenue - monthlyExpenses;
+
+    return {
+      todayRevenue,
+      monthlyRevenue,
+      monthlyExpenses,
+      netProfit,
+    };
+  }
+
   async getMembersWithSubscriptions(filter?: 'active' | 'expired' | 'all'): Promise<MemberWithSubscription[]> {
     const db = await this.getDatabase();
     

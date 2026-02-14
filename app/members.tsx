@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import type { MemberWithSubscription, SubscriptionStatus } from '../types/database';
 
@@ -29,17 +29,16 @@ export default function MembersScreen() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadMembers();
-  }, [filter]);
-
-  useEffect(() => {
-    if (searchQuery.trim()) {
-      searchMembers();
-    } else {
-      loadMembers();
-    }
-  }, [searchQuery]);
+  // Load members when screen comes into focus or filter/search changes
+  useFocusEffect(
+    React.useCallback(() => {
+      if (searchQuery.trim()) {
+        searchMembers();
+      } else {
+        loadMembers();
+      }
+    }, [filter, searchQuery])
+  );
 
   const loadMembers = async () => {
     try {
