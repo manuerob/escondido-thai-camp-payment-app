@@ -3,7 +3,6 @@ import {
   StyleSheet, 
   Text, 
   View, 
-  SafeAreaView, 
   useWindowDimensions,
   ScrollView
 } from 'react-native';
@@ -16,7 +15,7 @@ export default function HomeScreen() {
   const isLandscape = width > height;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar style="auto" />
       <ScrollView 
         contentContainerStyle={styles.scrollContent}
@@ -58,7 +57,7 @@ export default function HomeScreen() {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -3,13 +3,15 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Drawer } from 'expo-router/drawer';
 import { Ionicons } from '@expo/vector-icons';
 import { useWindowDimensions } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function DrawerLayout() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
       <Drawer
         screenOptions={{
           drawerType: isTablet ? 'permanent' : 'front',
@@ -93,5 +95,6 @@ export default function DrawerLayout() {
         />
       </Drawer>
     </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }
