@@ -13,8 +13,8 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { databaseService } from '../services/database.service';
-import type { PaymentMethod } from '../types/database';
+import { databaseService } from '../../services/database.service';
+import type { PaymentMethod } from '../../types/database';
 
 const CATEGORIES = [
   'Equipment',
@@ -109,9 +109,9 @@ export default function AddExpenseScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="auto" />
-
+    <View style={styles.modalOverlay}>
+      <StatusBar style="light" />
+      <View style={[styles.modalCard, isTablet && styles.tabletModalCard]}>
       {/* Header */}
       <View style={[styles.header, isTablet && styles.tabletHeader]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -127,6 +127,7 @@ export default function AddExpenseScreen() {
           styles.scrollContent,
           isTablet && styles.tabletScrollContent,
         ]}
+        showsVerticalScrollIndicator={false}
       >
         {/* Title Input */}
         <View style={styles.section}>
@@ -301,14 +302,28 @@ export default function AddExpenseScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '92%',
+    paddingTop: 8,
+  },
+  tabletModalCard: {
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    maxHeight: '85%',
   },
 
   // Header

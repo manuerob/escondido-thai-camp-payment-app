@@ -13,8 +13,8 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { databaseService } from '../services/database.service';
-import type { Package, PaymentMethod, PaymentStatus } from '../types/database';
+import { databaseService } from '../../services/database.service';
+import type { Package, PaymentMethod, PaymentStatus } from '../../types/database';
 
 const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'card', 'bank_transfer', 'digital_wallet'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending'];
@@ -117,15 +117,17 @@ export default function AddMemberScreen() {
   const selectedPackage = packages.find(p => p.id === selectedPackageId);
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="auto" />
-      <ScrollView 
-        contentContainerStyle={[
-          styles.scrollContent,
-          isTablet && styles.tabletScrollContent
-        ]}
-        keyboardShouldPersistTaps="handled"
-      >
+    <View style={styles.modalOverlay}>
+      <StatusBar style="light" />
+      <View style={[styles.modalCard, isTablet && styles.tabletModalCard]}>
+        <ScrollView 
+          contentContainerStyle={[
+            styles.scrollContent,
+            isTablet && styles.tabletScrollContent
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -352,14 +354,28 @@ export default function AddMemberScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '92%',
+    paddingTop: 8,
+  },
+  tabletModalCard: {
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    maxHeight: '85%',
   },
   scrollContent: {
     padding: 16,

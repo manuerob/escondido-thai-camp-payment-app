@@ -23,7 +23,7 @@ export default function DrawerLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
       <Drawer
         screenOptions={{
-          drawerType: isTablet ? 'permanent' : 'front',
+          drawerType: 'front',
           drawerStyle: {
             width: isTablet ? 280 : 240,
           },
@@ -38,7 +38,7 @@ export default function DrawerLayout() {
           drawerActiveTintColor: '#2563eb',
           drawerInactiveTintColor: '#666',
           drawerLabelStyle: {
-            marginLeft: -16,
+            marginLeft: 8,
           },
         }}
       >
@@ -103,13 +103,6 @@ export default function DrawerLayout() {
           }}
         />
         <Drawer.Screen
-          name="add-member"
-          options={{
-            drawerItemStyle: { display: 'none' },
-            title: 'Add Member',
-          }}
-        />
-        <Drawer.Screen
           name="member-detail"
           options={{
             drawerItemStyle: { display: 'none' },
@@ -117,10 +110,10 @@ export default function DrawerLayout() {
           }}
         />
         <Drawer.Screen
-          name="add-expense"
+          name="(modals)"
           options={{
             drawerItemStyle: { display: 'none' },
-            title: 'Add Expense',
+            headerShown: false,
           }}
         />
       </Drawer>
