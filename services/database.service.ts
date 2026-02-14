@@ -18,6 +18,7 @@ import type {
   PaginationParams,
   DateRangeFilter,
   MemberWithSubscription,
+  PaymentWithDetails,
 } from '../types/database';
 
 const DB_NAME = 'gym_tracker.db';
@@ -717,6 +718,38 @@ class DatabaseService {
       'UPDATE payments SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
       [id]
     );
+  }
+
+  async getPaymentsWithDetails(filter?: {
+    dateFilter?: 'today' | 'this_month';
+    statusFilter?: 'completed' | 'pending';
+  }): Promise<PaymentWithDetails[]> {
+    const db = await this.getDatabase();
+    let query = `
+      SELECT 
+        p.*,
+        (m.first_name || ' ' || m.last_name) as member_name,
+        m.email as member_email
+      FROM payments p
+      LEFT JOIN members m ON p.member_id = m.id
+      WHERE p.deleted_at IS NULL
+    `;
+    const params: any[] = [];
+
+    if (filter?.dateFilter === 'today') {
+      query += ' AND DATE(p.payment_date) = DATE("now")';
+    } else if (filter?.dateFilter === 'this_month') {
+      query += ' AND strftime("%Y-%m", p.payment_date) = strftime("%Y-%m", "now")';
+    }
+
+    if (filter?.statusFilter) {
+      query += ' AND p.status = ?';
+      params.push(filter.statusFilter);
+    }
+
+    query += ' ORDER BY p.payment_date DESC, p.created_at DESC';
+
+    return await db.getAllAsync<PaymentWithDetails>(query, params);
   }
 
   // ============================================
