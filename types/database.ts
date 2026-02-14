@@ -26,27 +26,33 @@ export interface BaseEntity {
 // ============================================
 
 export interface Member extends BaseEntity {
-  name: string;
-  email: string;
+  first_name: string;
+  last_name: string;
   phone: string | null;
+  email: string | null;
+  instagram: string | null;
   address: string | null;
   emergency_contact: string | null;
   notes: string | null;
 }
 
 export interface CreateMemberInput {
-  name: string;
-  email: string;
+  first_name: string;
+  last_name: string;
   phone?: string;
+  email?: string;
+  instagram?: string;
   address?: string;
   emergency_contact?: string;
   notes?: string;
 }
 
 export interface UpdateMemberInput {
-  name?: string;
-  email?: string;
+  first_name?: string;
+  last_name?: string;
   phone?: string;
+  email?: string;
+  instagram?: string;
   address?: string;
   emergency_contact?: string;
   notes?: string;
@@ -208,6 +214,20 @@ export interface PaymentWithDetails extends Payment {
   subscription_start_date?: string;
   subscription_end_date?: string;
   package_name?: string;
+}
+
+// ============================================
+// MEMBER WITH SUBSCRIPTION
+// ============================================
+
+export interface MemberWithSubscription extends Member {
+  subscription_id: number | null;
+  subscription_status: SubscriptionStatus | null;
+  subscription_start_date: string | null;
+  subscription_end_date: string | null;
+  package_id: number | null;
+  package_name: string | null;
+  package_price: number | null;
 }
 
 // ============================================

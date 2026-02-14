@@ -17,6 +17,7 @@ import type {
   UpdateExpenseInput,
   PaginationParams,
   DateRangeFilter,
+  MemberWithSubscription,
 } from '../types/database';
 
 const DB_NAME = 'gym_tracker.db';
@@ -27,12 +28,44 @@ class DatabaseService {
   async init(): Promise<void> {
     try {
       this.db = await SQLite.openDatabaseAsync(DB_NAME);
+      await this.checkAndMigrate();
       await this.createTables();
       await this.seedDefaultData();
       console.log('Database initialized successfully');
     } catch (error) {
       console.error('Error initializing database:', error);
       throw error;
+    }
+  }
+
+  private async checkAndMigrate(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      // Check if old schema exists (has 'name' column instead of 'first_name')
+      const result = await this.db.getFirstAsync<any>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='members'"
+      );
+
+      // If members table exists and has old schema, drop and recreate
+      if (result?.sql && result.sql.includes('name TEXT NOT NULL') && !result.sql.includes('first_name')) {
+        console.log('🔄 Migrating database schema...');
+        
+        // Drop all tables
+        await this.db.execAsync(`
+          DROP TABLE IF EXISTS members;
+          DROP TABLE IF EXISTS packages;
+          DROP TABLE IF EXISTS subscriptions;
+          DROP TABLE IF EXISTS payments;
+          DROP TABLE IF EXISTS expenses;
+          DROP TABLE IF EXISTS app_metadata;
+        `);
+        
+        console.log('✅ Database migration completed');
+      }
+    } catch (error) {
+      // Table doesn't exist yet, that's fine
+      console.log('No migration needed');
     }
   }
 
@@ -43,9 +76,11 @@ class DatabaseService {
       -- Members table
       CREATE TABLE IF NOT EXISTS members (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
         phone TEXT,
+        email TEXT,
+        instagram TEXT,
         address TEXT,
         emergency_contact TEXT,
         notes TEXT,
@@ -132,7 +167,8 @@ class DatabaseService {
       );
 
       -- Indexes
-      CREATE INDEX IF NOT EXISTS idx_members_email ON members(email) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_members_first_name ON members(first_name) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_members_last_name ON members(last_name) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_members_sync_status ON members(sync_status) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_packages_active ON packages(is_active) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_subscriptions_member ON subscriptions(member_id) WHERE deleted_at IS NULL;
@@ -252,10 +288,10 @@ class DatabaseService {
   async createMember(input: CreateMemberInput): Promise<Member> {
     const db = await this.getDatabase();
     const result = await db.runAsync(
-      `INSERT INTO members (name, email, phone, address, emergency_contact, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [input.name, input.email, input.phone || null, input.address || null, 
-       input.emergency_contact || null, input.notes || null]
+      `INSERT INTO members (first_name, last_name, phone, email, instagram, address, emergency_contact, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [input.first_name, input.last_name, input.phone || null, input.email || null,
+       input.instagram || null, input.address || null, input.emergency_contact || null, input.notes || null]
     );
     
     const member = await db.getFirstAsync<Member>(
@@ -294,13 +330,21 @@ class DatabaseService {
     const fields: string[] = [];
     const values: any[] = [];
 
-    if (input.name !== undefined) {
-      fields.push('name = ?');
-      values.push(input.name);
+    if (input.first_name !== undefined) {
+      fields.push('first_name = ?');
+      values.push(input.first_name);
+    }
+    if (input.last_name !== undefined) {
+      fields.push('last_name = ?');
+      values.push(input.last_name);
     }
     if (input.email !== undefined) {
       fields.push('email = ?');
-      values.push(input.email);
+      values.push(input.email || null);
+    }
+    if (input.instagram !== undefined) {
+      fields.push('instagram = ?');
+      values.push(input.instagram || null);
     }
     if (input.phone !== undefined) {
       fields.push('phone = ?');
@@ -379,6 +423,10 @@ class DatabaseService {
       : 'SELECT * FROM packages WHERE deleted_at IS NULL ORDER BY name ASC';
     
     return await db.getAllAsync<Package>(query);
+  }
+
+  async getActivePackages(): Promise<Package[]> {
+    return this.getAllPackages(true);
   }
 
   async updatePackage(id: number, input: UpdatePackageInput): Promise<Package> {
@@ -847,6 +895,85 @@ class DatabaseService {
       expiringSoonCount,
       pendingSyncCount: pendingResult?.count || 0,
     };
+  }
+
+  async getMembersWithSubscriptions(filter?: 'active' | 'expired' | 'all'): Promise<MemberWithSubscription[]> {
+    const db = await this.getDatabase();
+    
+    let statusFilter = '';
+    if (filter === 'active') {
+      statusFilter = "AND s.status = 'active'";
+    } else if (filter === 'expired') {
+      statusFilter = "AND s.status = 'expired'";
+    }
+    
+    const members = await db.getAllAsync<MemberWithSubscription>(
+      `SELECT 
+        m.*,
+        s.id as subscription_id,
+        s.status as subscription_status,
+        s.start_date as subscription_start_date,
+        s.end_date as subscription_end_date,
+        p.id as package_id,
+        p.name as package_name,
+        p.price as package_price
+      FROM members m
+      LEFT JOIN subscriptions s ON m.id = s.member_id 
+        AND s.deleted_at IS NULL
+        AND s.id = (
+          SELECT id FROM subscriptions 
+          WHERE member_id = m.id AND deleted_at IS NULL 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        )
+      LEFT JOIN packages p ON s.package_id = p.id AND p.deleted_at IS NULL
+      WHERE m.deleted_at IS NULL ${statusFilter}
+      ORDER BY m.first_name ASC, m.last_name ASC`
+    );
+    
+    return members;
+  }
+
+  async searchMembers(query: string, filter?: 'active' | 'expired' | 'all'): Promise<MemberWithSubscription[]> {
+    const db = await this.getDatabase();
+    
+    let statusFilter = '';
+    if (filter === 'active') {
+      statusFilter = "AND s.status = 'active'";
+    } else if (filter === 'expired') {
+      statusFilter = "AND s.status = 'expired'";
+    }
+    
+    const searchPattern = `%${query}%`;
+    
+    const members = await db.getAllAsync<MemberWithSubscription>(
+      `SELECT 
+        m.*,
+        s.id as subscription_id,
+        s.status as subscription_status,
+        s.start_date as subscription_start_date,
+        s.end_date as subscription_end_date,
+        p.id as package_id,
+        p.name as package_name,
+        p.price as package_price
+      FROM members m
+      LEFT JOIN subscriptions s ON m.id = s.member_id 
+        AND s.deleted_at IS NULL
+        AND s.id = (
+          SELECT id FROM subscriptions 
+          WHERE member_id = m.id AND deleted_at IS NULL 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        )
+      LEFT JOIN packages p ON s.package_id = p.id AND p.deleted_at IS NULL
+      WHERE m.deleted_at IS NULL 
+        AND (m.first_name LIKE ? OR m.last_name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.instagram LIKE ?)
+        ${statusFilter}
+      ORDER BY m.first_name ASC, m.last_name ASC`,
+      [searchPattern, searchPattern, searchPattern, searchPattern, searchPattern]
+    );
+    
+    return members;
   }
 
   // ============================================
