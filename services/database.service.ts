@@ -28,6 +28,7 @@ class DatabaseService {
     try {
       this.db = await SQLite.openDatabaseAsync(DB_NAME);
       await this.createTables();
+      await this.seedDefaultData();
       console.log('Database initialized successfully');
     } catch (error) {
       console.error('Error initializing database:', error);
@@ -123,6 +124,13 @@ class DatabaseService {
         deleted_at TEXT
       );
 
+      -- Metadata table for tracking app state
+      CREATE TABLE IF NOT EXISTS app_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
       -- Indexes
       CREATE INDEX IF NOT EXISTS idx_members_email ON members(email) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_members_sync_status ON members(sync_status) WHERE deleted_at IS NULL;
@@ -176,6 +184,65 @@ class DatabaseService {
       await this.init();
     }
     return this.db!;
+  }
+
+  // ============================================
+  // SEED DEFAULT DATA
+  // ============================================
+
+  private async seedDefaultData(): Promise<void> {
+    const db = await this.getDatabase();
+    
+    // Check if seeding has already been done
+    const seeded = await db.getFirstAsync<{ value: string }>(
+      'SELECT value FROM app_metadata WHERE key = ?',
+      ['packages_seeded']
+    );
+
+    if (seeded?.value === 'true') {
+      console.log('Default packages already seeded');
+      return;
+    }
+
+    console.log('Seeding default packages...');
+
+    // Seed default packages
+    const defaultPackages: CreatePackageInput[] = [
+      {
+        name: 'Single Entry',
+        description: 'One-time gym entry',
+        price: 150,
+        duration_days: 1, // Valid for 1 day
+        sessions_included: 1,
+        is_active: true,
+      },
+      {
+        name: 'Week Pass',
+        description: '7-day unlimited access',
+        price: 800,
+        duration_days: 7,
+        is_active: true,
+      },
+      {
+        name: 'Monthly Pass',
+        description: '30-day unlimited access',
+        price: 2500,
+        duration_days: 30,
+        is_active: true,
+      },
+    ];
+
+    for (const pkg of defaultPackages) {
+      await this.createPackage(pkg);
+    }
+
+    // Mark seeding as complete
+    await db.runAsync(
+      'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)',
+      ['packages_seeded', 'true']
+    );
+
+    console.log('Default packages seeded successfully');
   }
 
   // ============================================
@@ -726,6 +793,63 @@ class DatabaseService {
   }
 
   // ============================================
+  // DASHBOARD STATS METHODS
+  // ============================================
+
+  async getActiveMembersCount(): Promise<number> {
+    const db = await this.getDatabase();
+    const result = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(DISTINCT s.member_id) as count
+       FROM subscriptions s
+       WHERE s.status = 'active' AND s.deleted_at IS NULL`
+    );
+    return result?.count || 0;
+  }
+
+  async getExpiringSoonCount(days: number = 7): Promise<number> {
+    const db = await this.getDatabase();
+    const result = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) as count
+       FROM subscriptions
+       WHERE status = 'active' 
+       AND deleted_at IS NULL
+       AND DATE(end_date) <= DATE('now', '+' || ? || ' days')
+       AND DATE(end_date) >= DATE('now')`,
+      [days]
+    );
+    return result?.count || 0;
+  }
+
+  async getDashboardStats(): Promise<{
+    activeMembersCount: number;
+    expiringSoonCount: number;
+    pendingSyncCount: number;
+  }> {
+    const [activeMembersCount, expiringSoonCount] = await Promise.all([
+      this.getActiveMembersCount(),
+      this.getExpiringSoonCount(7),
+    ]);
+
+    const db = await this.getDatabase();
+    
+    // Count all pending records across all tables
+    const pendingResult = await db.getFirstAsync<{ count: number }>(
+      `SELECT 
+        (SELECT COUNT(*) FROM members WHERE sync_status = 'pending' AND deleted_at IS NULL) +
+        (SELECT COUNT(*) FROM subscriptions WHERE sync_status = 'pending' AND deleted_at IS NULL) +
+        (SELECT COUNT(*) FROM payments WHERE sync_status = 'pending' AND deleted_at IS NULL) +
+        (SELECT COUNT(*) FROM expenses WHERE sync_status = 'pending' AND deleted_at IS NULL)
+        as count`
+    );
+
+    return {
+      activeMembersCount,
+      expiringSoonCount,
+      pendingSyncCount: pendingResult?.count || 0,
+    };
+  }
+
+  // ============================================
   // SYNC METHODS
   // ============================================
 
@@ -768,9 +892,11 @@ class DatabaseService {
       DROP TABLE IF EXISTS subscriptions;
       DROP TABLE IF EXISTS payments;
       DROP TABLE IF EXISTS expenses;
+      DROP TABLE IF EXISTS app_metadata;
     `);
     
     await this.createTables();
+    await this.seedDefaultData();
     console.log('Database reset successfully');
   }
 

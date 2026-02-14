@@ -128,6 +128,15 @@ CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date) WHERE del
 CREATE INDEX IF NOT EXISTS idx_expenses_sync_status ON expenses(sync_status) WHERE deleted_at IS NULL;
 
 -- ============================================
+-- APP METADATA TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS app_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
 -- TRIGGERS FOR UPDATED_AT
 -- ============================================
 
@@ -265,3 +274,17 @@ CREATE TRIGGER IF NOT EXISTS reset_expenses_sync_status
 BEGIN
   UPDATE expenses SET sync_status = 'pending' WHERE id = NEW.id;
 END;
+
+-- ============================================
+-- DEFAULT SEED DATA
+-- ============================================
+
+-- Insert default packages (only if not already seeded)
+INSERT OR IGNORE INTO packages (id, name, description, price, duration_days, sessions_included, is_active)
+VALUES 
+  (1, 'Single Entry', 'One-time gym entry', 150, 0, 1, 1),
+  (2, 'Week Pass', '7-day unlimited access', 800, 7, NULL, 1),
+  (3, 'Monthly Pass', '30-day unlimited access', 2500, 30, NULL, 1);
+
+-- Mark packages as seeded
+INSERT OR REPLACE INTO app_metadata (key, value) VALUES ('packages_seeded', 'true');
