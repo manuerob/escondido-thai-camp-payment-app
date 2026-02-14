@@ -171,20 +171,20 @@ export interface Expense extends BaseEntity {
   category: string;
   amount: number;
   expense_date: string;
+  payment_method: PaymentMethod;
   vendor: string | null;
   description: string | null;
   receipt_url: string | null;
-  payment_method: PaymentMethod | null;
 }
 
 export interface CreateExpenseInput {
   category: string;
   amount: number;
   expense_date: string;
+  payment_method: PaymentMethod;
   vendor?: string;
   description?: string;
   receipt_url?: string;
-  payment_method?: PaymentMethod;
 }
 
 export interface UpdateExpenseInput {

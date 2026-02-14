@@ -107,6 +107,13 @@ export default function DrawerLayout() {
             title: 'Member Details',
           }}
         />
+        <Drawer.Screen
+          name="add-expense"
+          options={{
+            drawerItemStyle: { display: 'none' },
+            title: 'Add Expense',
+          }}
+        />
       </Drawer>
     </GestureHandlerRootView>
     </SafeAreaProvider>

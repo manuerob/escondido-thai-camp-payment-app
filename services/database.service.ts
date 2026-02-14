@@ -43,13 +43,34 @@ class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
 
     try {
-      // Check if old schema exists (has 'name' column instead of 'first_name')
-      const result = await this.db.getFirstAsync<any>(
+      let needsMigration = false;
+
+      // Check if old members schema exists (has 'name' column instead of 'first_name')
+      const membersResult = await this.db.getFirstAsync<any>(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='members'"
       );
 
-      // If members table exists and has old schema, drop and recreate
-      if (result?.sql && result.sql.includes('name TEXT NOT NULL') && !result.sql.includes('first_name')) {
+      if (membersResult?.sql && membersResult.sql.includes('name TEXT NOT NULL') && !membersResult.sql.includes('first_name')) {
+        needsMigration = true;
+      }
+
+      // Check if expenses table has incorrect payment_method definition (nullable instead of NOT NULL)
+      const expensesResult = await this.db.getFirstAsync<any>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='expenses'"
+      );
+
+      if (expensesResult?.sql) {
+        // Old schema had: payment_method TEXT CHECK(...)
+        // New schema has: payment_method TEXT NOT NULL CHECK(...)
+        if (expensesResult.sql.includes('payment_method TEXT CHECK') && 
+            !expensesResult.sql.includes('payment_method TEXT NOT NULL')) {
+          console.log('Detected old expenses schema with nullable payment_method');
+          needsMigration = true;
+        }
+      }
+
+      // If migration needed, drop and recreate
+      if (needsMigration) {
         console.log('🔄 Migrating database schema...');
         
         // Drop all tables
@@ -153,7 +174,7 @@ class DatabaseService {
         vendor TEXT,
         description TEXT,
         receipt_url TEXT,
-        payment_method TEXT CHECK(payment_method IN ('cash', 'card', 'bank_transfer', 'digital_wallet', 'other')),
+        payment_method TEXT NOT NULL CHECK(payment_method IN ('cash', 'card', 'bank_transfer', 'digital_wallet', 'other')),
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
@@ -758,12 +779,15 @@ class DatabaseService {
 
   async createExpense(input: CreateExpenseInput): Promise<Expense> {
     const db = await this.getDatabase();
+    console.log('Creating expense with data:', input);
     const result = await db.runAsync(
       `INSERT INTO expenses (category, amount, expense_date, vendor, description, receipt_url, payment_method)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [input.category, input.amount, input.expense_date, input.vendor || null,
-       input.description || null, input.receipt_url || null, input.payment_method || null]
+       input.description || null, input.receipt_url || null, input.payment_method]
     );
+    
+    console.log('Expense inserted with ID:', result.lastInsertRowId);
     
     const expense = await db.getFirstAsync<Expense>(
       'SELECT * FROM expenses WHERE id = ?',
@@ -771,6 +795,7 @@ class DatabaseService {
     );
     
     if (!expense) throw new Error('Failed to create expense');
+    console.log('Expense retrieved from DB:', expense);
     return expense;
   }
 
@@ -788,6 +813,7 @@ class DatabaseService {
     const offset = filter.offset || 0;
 
     if (filter.start_date && filter.end_date) {
+      console.log('Fetching expenses with date range:', filter.start_date, 'to', filter.end_date);
       return await db.getAllAsync<Expense>(
         `SELECT * FROM expenses 
          WHERE expense_date BETWEEN ? AND ? AND deleted_at IS NULL 
@@ -797,13 +823,16 @@ class DatabaseService {
       );
     }
 
-    return await db.getAllAsync<Expense>(
+    console.log('Fetching all expenses (no date filter)');
+    const expenses = await db.getAllAsync<Expense>(
       `SELECT * FROM expenses 
        WHERE deleted_at IS NULL 
        ORDER BY expense_date DESC 
        LIMIT ? OFFSET ?`,
       [limit, offset]
     );
+    console.log(`Found ${expenses.length} expenses in database`);
+    return expenses;
   }
 
   async getExpensesByCategory(category: string): Promise<Expense[]> {
