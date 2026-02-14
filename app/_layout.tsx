@@ -4,10 +4,19 @@ import { Drawer } from 'expo-router/drawer';
 import { Ionicons } from '@expo/vector-icons';
 import { useWindowDimensions } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useDatabase } from '@/hooks';
 
 export default function DrawerLayout() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  
+  // Initialize database and sync
+  const { isReady, isSyncing, error } = useDatabase();
+  
+  // Log sync status for debugging
+  if (isSyncing) {
+    console.log('🔄 Syncing...');
+  }
 
   return (
     <SafeAreaProvider>

@@ -402,6 +402,253 @@ When you're ready to deploy:
    supabase db push
    ```
 
+## Cloud Sync Integration
+
+The app includes comprehensive cloud sync functionality that keeps local SQLite data synchronized with Supabase while maintaining full offline functionality.
+
+### How It Works
+
+**Local-First Architecture:**
+- SQLite is the primary database - all operations work offline
+- Sync runs in the background when internet is available
+- Bidirectional sync: pushes local changes and pulls remote changes
+- Conflict resolution: latest `updated_at` timestamp wins
+
+### Sync Features
+
+✅ **Automatic Background Sync**
+- Initial sync when app loads
+- Periodic sync every 5 minutes
+- Automatic after database initialization
+
+✅ **Smart Conflict Resolution**
+- Compares `updated_at` timestamps
+- Latest version wins automatically
+- Local changes preserved until synced
+- Handles soft deletes properly
+
+✅ **Network-Aware**
+- Checks connectivity before sync
+- Gracefully handles offline mode
+- Caches connectivity status to reduce checks
+- No disruption to offline functionality
+
+✅ **Comprehensive Sync**
+- Members
+- Packages
+- Subscriptions
+- Payments
+- Expenses
+
+### Configuration
+
+1. **Set up Supabase credentials:**
+
+Create a `.env` file in the root directory (copy from `.env.example`):
+```env
+EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+2. **Create Supabase tables:**
+
+The tables should match the SQLite schema. Use the migration in `schema.sql` or create manually in Supabase Studio:
+
+```sql
+-- Example for members table
+CREATE TABLE members (
+  id BIGSERIAL PRIMARY KEY,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  phone TEXT,
+  email TEXT,
+  instagram TEXT,
+  address TEXT,
+  emergency_contact TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  sync_status TEXT NOT NULL DEFAULT 'pending',
+  deleted_at TIMESTAMPTZ
+);
+
+-- Add trigger for updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_members_updated_at
+  BEFORE UPDATE ON members
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+```
+
+Repeat for all tables: `packages`, `subscriptions`, `payments`, `expenses`.
+
+3. **Enable Row Level Security (RLS):**
+
+For development/testing, you can disable RLS or create permissive policies:
+
+```sql
+-- Option 1: Disable RLS (for development only)
+ALTER TABLE members DISABLE ROW LEVEL SECURITY;
+ALTER TABLE packages DISABLE ROW LEVEL SECURITY;
+-- ... etc
+
+-- Option 2: Create permissive policy (for authenticated users)
+ALTER TABLE members ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all for authenticated users"
+  ON members
+  FOR ALL
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
+```
+
+### Using Sync in Your App
+
+**Automatic Sync (Default):**
+```typescript
+import { useDatabase } from '@/hooks';
+
+function MyComponent() {
+  const { isReady, isSyncing, lastSyncResult } = useDatabase();
+  
+  if (!isReady) return <Loading />;
+  
+  return (
+    <View>
+      {isSyncing && <SyncIndicator />}
+      {/* Your content */}
+    </View>
+  );
+}
+```
+
+**Manual Sync Trigger:**
+```typescript
+import { useDatabase } from '@/hooks';
+
+function SettingsScreen() {
+  const { triggerSync, isSyncing, lastSyncResult } = useDatabase();
+  
+  return (
+    <Button 
+      title={isSyncing ? "Syncing..." : "Sync Now"}
+      onPress={triggerSync}
+      disabled={isSyncing}
+    />
+  );
+}
+```
+
+**Push/Pull Separately:**
+```typescript
+import { useDatabase } from '@/hooks';
+
+function DataManagement() {
+  const { pushChanges, pullChanges, isSyncing } = useDatabase();
+  
+  return (
+    <View>
+      <Button title="Push Local Changes" onPress={pushChanges} />
+      <Button title="Pull Remote Changes" onPress={pullChanges} />
+    </View>
+  );
+}
+```
+
+**Direct Service Access:**
+```typescript
+import { syncService } from '@/services';
+
+// Full bidirectional sync
+const result = await syncService.syncAll();
+console.log(`Synced: ${result.recordsPushed} pushed, ${result.recordsPulled} pulled`);
+
+// Push only
+await syncService.pushChanges();
+
+// Pull only
+await syncService.pullChanges();
+
+// Check sync status
+if (syncService.isSyncInProgress()) {
+  console.log('Sync in progress...');
+}
+
+// Listen to sync events
+const unsubscribe = syncService.onSyncComplete((result) => {
+  if (result.success) {
+    console.log('Sync successful!');
+  } else {
+    console.error('Sync errors:', result.errors);
+  }
+});
+```
+
+### Sync Status & Results
+
+The `SyncResult` object contains:
+```typescript
+{
+  success: boolean;           // Overall success status
+  tablesProcessed: string[];  // Tables that were synced
+  recordsPushed: number;      // Total records pushed to Supabase
+  recordsPulled: number;      // Total records pulled from Supabase
+  errors: string[];           // Any errors encountered
+  timestamp: string;          // When sync occurred
+}
+```
+
+### Testing Sync
+
+1. **Test Offline → Online:**
+   - Turn off internet
+   - Create/update records in the app
+   - Turn on internet
+   - Wait for sync or trigger manually
+   - Verify changes appear in Supabase
+
+2. **Test Online → Offline:**
+   - Make changes in Supabase Studio
+   - Trigger pull sync in app
+   - Verify changes appear locally
+
+3. **Test Conflicts:**
+   - Make different changes to same record online and offline
+   - Sync
+   - Newest change (by `updated_at`) should win
+
+### Troubleshooting
+
+**Sync not happening:**
+- Check internet connectivity
+- Verify Supabase credentials in `.env`
+- Check console for errors
+- Ensure Supabase tables exist
+
+**Conflicts not resolving:**
+- Verify `updated_at` fields are set correctly
+- Check table triggers in Supabase
+- Review sync logs in console
+
+**Performance issues:**
+- Adjust `SYNC_INTERVAL` in `hooks/useDatabase.ts`
+- Consider selective sync for large datasets
+- Add indexes to Supabase tables
+
+**Sync disabled:**
+If you don't want cloud sync:
+- Leave `.env` empty or don't create it
+- App works perfectly offline-only
+- No functionality is broken
+
 ## Additional Resources
 
 - [Supabase CLI Documentation](https://supabase.com/docs/guides/cli)

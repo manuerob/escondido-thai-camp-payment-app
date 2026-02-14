@@ -1,49 +1,146 @@
 import 'react-native-url-polyfill/auto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { Member, Package, Subscription, Payment, Expense } from '@/types/database';
 
 // Replace these with your actual Supabase project credentials
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
+type SyncableRecord = Member | Package | Subscription | Payment | Expense;
 
 class SupabaseService {
-  private client: SupabaseClient;
+  private client: SupabaseClient | null = null;
+  private isConfigured: boolean = false;
 
   constructor() {
-    this.client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    this.initialize();
   }
 
-  getClient(): SupabaseClient {
+  private initialize(): void {
+    // Only initialize if credentials are provided
+    if (SUPABASE_URL && SUPABASE_ANON_KEY && 
+        SUPABASE_URL !== '' && 
+        SUPABASE_ANON_KEY !== '') {
+      try {
+        this.client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        this.isConfigured = true;
+        console.log('Supabase client initialized');
+      } catch (error) {
+        console.error('Failed to initialize Supabase client:', error);
+        this.isConfigured = false;
+      }
+    } else {
+      console.log('Supabase credentials not configured - sync disabled');
+      this.isConfigured = false;
+    }
+  }
+
+  getClient(): SupabaseClient | null {
     return this.client;
   }
 
-  // Sync helpers - to be implemented when needed
-  async syncMembersToSupabase(members: any[]): Promise<void> {
-    // Implementation for syncing local members to Supabase
-    console.log('Syncing members to Supabase:', members.length);
+  isReady(): boolean {
+    return this.isConfigured && this.client !== null;
   }
 
-  async syncPaymentsToSupabase(payments: any[]): Promise<void> {
-    // Implementation for syncing local payments to Supabase
-    console.log('Syncing payments to Supabase:', payments.length);
-  }
-
-  async syncExpensesToSupabase(expenses: any[]): Promise<void> {
-    // Implementation for syncing local expenses to Supabase
-    console.log('Syncing expenses to Supabase:', expenses.length);
-  }
-
-  async pullDataFromSupabase(): Promise<void> {
-    // Implementation for pulling data from Supabase to local DB
-    console.log('Pulling data from Supabase');
-  }
-
+  /**
+   * Check if Supabase is accessible
+   */
   async checkConnection(): Promise<boolean> {
-    try {
-      const { error } = await this.client.from('members').select('count').limit(1);
-      return !error;
-    } catch {
+    if (!this.isReady()) {
       return false;
     }
+
+    try {
+      const { error } = await this.client!
+        .from('members')
+        .select('id')
+        .limit(1);
+      
+      return !error;
+    } catch (error) {
+      console.error('Supabase connection check failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Push records to Supabase
+   * Uses upsert to handle both inserts and updates
+   */
+  async pushRecords<T extends SyncableRecord>(
+    table: string,
+    records: T[]
+  ): Promise<{ success: boolean; syncedIds: number[]; error?: string }> {
+    if (!this.isReady()) {
+      return { success: false, syncedIds: [], error: 'Supabase not configured' };
+    }
+
+    if (records.length === 0) {
+      return { success: true, syncedIds: [] };
+    }
+
+    try {
+      // Upsert records to Supabase
+      const { data, error } = await this.client!
+        .from(table)
+        .upsert(records, { onConflict: 'id' })
+        .select('id');
+
+      if (error) {
+        console.error(`Error pushing ${table}:`, error);
+        return { success: false, syncedIds: [], error: error.message };
+      }
+
+      const syncedIds = (data || []).map((r: any) => r.id);
+      console.log(`Pushed ${syncedIds.length} ${table} to Supabase`);
+      
+      return { success: true, syncedIds };
+    } catch (error: any) {
+      console.error(`Exception pushing ${table}:`, error);
+      return { success: false, syncedIds: [], error: error.message };
+    }
+  }
+
+  /**
+   * Pull records from Supabase that have been updated since last sync
+   */
+  async pullRecords<T extends SyncableRecord>(
+    table: string,
+    lastSyncTime: string | null
+  ): Promise<{ success: boolean; records: T[]; error?: string }> {
+    if (!this.isReady()) {
+      return { success: false, records: [], error: 'Supabase not configured' };
+    }
+
+    try {
+      let query = this.client!.from(table).select('*');
+
+      // Only get records updated after last sync
+      if (lastSyncTime) {
+        query = query.gt('updated_at', lastSyncTime);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error(`Error pulling ${table}:`, error);
+        return { success: false, records: [], error: error.message };
+      }
+
+      console.log(`Pulled ${data?.length || 0} ${table} from Supabase`);
+      return { success: true, records: (data as T[]) || [] };
+    } catch (error: any) {
+      console.error(`Exception pulling ${table}:`, error);
+      return { success: false, records: [], error: error.message };
+    }
+  }
+
+  /**
+   * Get all tables that need to be synced
+   */
+  getSyncTables(): string[] {
+    return ['members', 'packages', 'subscriptions', 'payments', 'expenses'];
   }
 }
 

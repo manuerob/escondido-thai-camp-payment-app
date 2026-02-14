@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type {
+  BaseEntity,
   Member,
   Package,
   Subscription,
@@ -25,8 +26,30 @@ const DB_NAME = 'gym_tracker.db';
 
 class DatabaseService {
   private db: SQLite.SQLiteDatabase | null = null;
+  private initPromise: Promise<void> | null = null;
 
   async init(): Promise<void> {
+    // If already initialized, return immediately
+    if (this.db) {
+      return;
+    }
+
+    // If initialization is in progress, wait for it
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+
+    // Start initialization
+    this.initPromise = this.initializeDatabase();
+    
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  private async initializeDatabase(): Promise<void> {
     try {
       this.db = await SQLite.openDatabaseAsync(DB_NAME);
       await this.checkAndMigrate();
@@ -34,6 +57,7 @@ class DatabaseService {
       await this.seedDefaultData();
       console.log('Database initialized successfully');
     } catch (error) {
+      this.db = null; // Reset on error
       console.error('Error initializing database:', error);
       throw error;
     }
@@ -1100,6 +1124,13 @@ class DatabaseService {
     );
   }
 
+  async getAllPendingRecordsIncludingDeleted<T = any>(table: string): Promise<T[]> {
+    const db = await this.getDatabase();
+    return await db.getAllAsync<T>(
+      `SELECT * FROM ${table} WHERE sync_status = 'pending'`
+    );
+  }
+
   async markAsSynced(table: string, id: number): Promise<void> {
     const db = await this.getDatabase();
     await db.runAsync(
@@ -1118,6 +1149,92 @@ class DatabaseService {
       ids
     );
   }
+
+  /**
+   * Upsert records from remote with conflict resolution
+   * If local record is newer (based on updated_at), keep local version
+   * Otherwise, update with remote version
+   */
+  async upsertFromRemote<T extends BaseEntity>(
+    table: string,
+    records: T[]
+  ): Promise<{ inserted: number; updated: number; skipped: number }> {
+    if (records.length === 0) {
+      return { inserted: 0, updated: 0, skipped: 0 };
+    }
+
+    const db = await this.getDatabase();
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const record of records) {
+      // Check if record exists locally
+      const existing = await db.getFirstAsync<BaseEntity>(
+        `SELECT id, updated_at FROM ${table} WHERE id = ?`,
+        [record.id]
+      );
+
+      if (!existing) {
+        // Insert new record
+        const columns = Object.keys(record).filter(k => k !== 'id');
+        const values = columns.map(k => (record as any)[k]);
+        const placeholders = columns.map(() => '?').join(',');
+        
+        await db.runAsync(
+          `INSERT OR IGNORE INTO ${table} (id, ${columns.join(', ')}) VALUES (?, ${placeholders})`,
+          [record.id, ...values]
+        );
+        inserted++;
+      } else {
+        // Compare timestamps for conflict resolution
+        const localTime = new Date(existing.updated_at).getTime();
+        const remoteTime = new Date(record.updated_at).getTime();
+
+        if (remoteTime > localTime) {
+          // Remote is newer, update local
+          const columns = Object.keys(record).filter(k => k !== 'id');
+          const setClause = columns.map(k => `${k} = ?`).join(', ');
+          const values = columns.map(k => (record as any)[k]);
+
+          await db.runAsync(
+            `UPDATE ${table} SET ${setClause} WHERE id = ?`,
+            [...values, record.id]
+          );
+          updated++;
+        } else {
+          // Local is newer or equal, skip update
+          skipped++;
+        }
+      }
+    }
+
+    return { inserted, updated, skipped };
+  }
+
+  /**
+   * Get the last sync timestamp for a table
+   */
+  async getLastSyncTime(table: string): Promise<string | null> {
+    const db = await this.getDatabase();
+    const result = await db.getFirstAsync<{ value: string }>(
+      `SELECT value FROM app_metadata WHERE key = ?`,
+      [`last_sync_${table}`]
+    );
+    return result?.value || null;
+  }
+
+  /**
+   * Set the last sync timestamp for a table
+   */
+  async setLastSyncTime(table: string, timestamp: string): Promise<void> {
+    const db = await this.getDatabase();
+    await db.runAsync(
+      `INSERT OR REPLACE INTO app_metadata (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+      [`last_sync_${table}`, timestamp]
+    );
+  }
+
 
   // ============================================
   // UTILITY METHODS
