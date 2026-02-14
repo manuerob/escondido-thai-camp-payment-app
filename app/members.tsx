@@ -120,7 +120,11 @@ export default function MembersScreen() {
   };
 
   const renderMemberItem = ({ item }: { item: MemberWithSubscription }) => (
-    <View style={[styles.memberCard, isTablet && styles.tabletMemberCard]}>
+    <TouchableOpacity 
+      style={[styles.memberCard, isTablet && styles.tabletMemberCard]}
+      onPress={() => router.push(`/member-detail?id=${item.id}`)}
+      activeOpacity={0.7}
+    >
       <View style={styles.memberInfo}>
         <View style={styles.memberHeader}>
           <Text style={[styles.memberName, isTablet && styles.tabletMemberName]}>
@@ -155,7 +159,10 @@ export default function MembersScreen() {
       <View style={styles.actionButtons}>
         <TouchableOpacity
           style={[styles.actionButton, styles.renewButton, isTablet && styles.tabletActionButton]}
-          onPress={() => handleRenew(item)}
+          onPress={(e) => {
+            e.stopPropagation();
+            handleRenew(item);
+          }}
         >
           <Ionicons name="refresh" size={isTablet ? 22 : 18} color="#fff" />
           <Text style={[styles.actionButtonText, isTablet && styles.tabletActionButtonText]}>
@@ -165,7 +172,10 @@ export default function MembersScreen() {
 
         <TouchableOpacity
           style={[styles.actionButton, styles.paymentButton, isTablet && styles.tabletActionButton]}
-          onPress={() => handleAddPayment(item)}
+          onPress={(e) => {
+            e.stopPropagation();
+            handleAddPayment(item);
+          }}
         >
           <Ionicons name="card" size={isTablet ? 22 : 18} color="#fff" />
           <Text style={[styles.actionButtonText, isTablet && styles.tabletActionButtonText]}>
@@ -173,7 +183,7 @@ export default function MembersScreen() {
           </Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (

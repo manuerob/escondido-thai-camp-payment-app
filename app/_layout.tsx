@@ -100,6 +100,13 @@ export default function DrawerLayout() {
             title: 'Add Member',
           }}
         />
+        <Drawer.Screen
+          name="member-detail"
+          options={{
+            drawerItemStyle: { display: 'none' },
+            title: 'Member Details',
+          }}
+        />
       </Drawer>
     </GestureHandlerRootView>
     </SafeAreaProvider>
