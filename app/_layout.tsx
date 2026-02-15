@@ -93,6 +93,16 @@ export default function DrawerLayout() {
           }}
         />
         <Drawer.Screen
+          name="schedule"
+          options={{
+            drawerLabel: 'Schedule',
+            title: 'Weekly Schedule',
+            drawerIcon: ({ color, size }: { color: string; size: number }) => (
+              <Ionicons name="calendar-outline" size={size} color={color} />
+            ),
+          }}
+        />
+        <Drawer.Screen
           name="finance"
           options={{
             drawerLabel: 'Finance',

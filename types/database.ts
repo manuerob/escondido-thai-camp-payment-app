@@ -223,6 +223,43 @@ export interface UpdateTodoInput {
 }
 
 // ============================================
+// SCHEDULE BLOCK INTERFACE
+// ============================================
+
+export type RepeatType = 'daily' | 'weekly' | 'custom';
+export type CustomRepeatFrequency = 'daily' | 'weekly';
+
+export interface ScheduleBlock extends BaseEntity {
+  day_of_week: number; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  specific_date: string | null; // For one-time blocks; if set, overrides day_of_week recurrence
+  start_time: string; // Format: "HH:MM"
+  end_time: string; // Format: "HH:MM"
+  title: string;
+  description: string | null;
+  color: string | null;
+}
+
+export interface CreateScheduleBlockInput {
+  day_of_week: number;
+  specific_date?: string;
+  start_time: string;
+  end_time: string;
+  title: string;
+  description?: string;
+  color?: string;
+}
+
+export interface UpdateScheduleBlockInput {
+  day_of_week?: number;
+  specific_date?: string;
+  start_time?: string;
+  end_time?: string;
+  title?: string;
+  description?: string;
+  color?: string;
+}
+
+// ============================================
 // JOINED DATA INTERFACES
 // ============================================
 

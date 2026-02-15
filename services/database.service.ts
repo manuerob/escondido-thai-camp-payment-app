@@ -7,6 +7,7 @@ import type {
   Payment,
   Expense,
   Todo,
+  ScheduleBlock,
   CreateMemberInput,
   UpdateMemberInput,
   CreatePackageInput,
@@ -19,6 +20,8 @@ import type {
   UpdateExpenseInput,
   CreateTodoInput,
   UpdateTodoInput,
+  CreateScheduleBlockInput,
+  UpdateScheduleBlockInput,
   PaginationParams,
   DateRangeFilter,
   MemberWithSubscription,
@@ -171,6 +174,73 @@ class DatabaseService {
           console.log('📝 Adding completed_at column to todos table...');
           await this.db.execAsync('ALTER TABLE todos ADD COLUMN completed_at TEXT');
           console.log('✅ completed_at column added');
+        }
+      }
+
+      // Check if schedule_blocks table exists, create it if it doesn't (additive migration)
+      const scheduleBlocksResult = await this.db.getFirstAsync<any>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='schedule_blocks'"
+      );
+
+      if (!scheduleBlocksResult) {
+        console.log('📝 Creating schedule_blocks table...');
+        await this.db.execAsync(`
+          CREATE TABLE IF NOT EXISTS schedule_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day_of_week INTEGER NOT NULL CHECK(day_of_week >= 0 AND day_of_week <= 6),
+            specific_date TEXT,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            color TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+            deleted_at TEXT
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_schedule_blocks_day ON schedule_blocks(day_of_week) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_schedule_blocks_time ON schedule_blocks(day_of_week, start_time) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_schedule_blocks_sync_status ON schedule_blocks(sync_status) WHERE deleted_at IS NULL;
+
+          CREATE TRIGGER IF NOT EXISTS update_schedule_blocks_updated_at
+            AFTER UPDATE ON schedule_blocks
+            FOR EACH ROW
+            WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+          BEGIN
+            UPDATE schedule_blocks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+          END;
+
+          CREATE TRIGGER IF NOT EXISTS reset_schedule_blocks_sync_status
+            AFTER UPDATE ON schedule_blocks
+            FOR EACH ROW
+            WHEN NEW.sync_status = 'synced' AND (
+              OLD.day_of_week != NEW.day_of_week OR
+              OLD.specific_date != NEW.specific_date OR
+              OLD.start_time != NEW.start_time OR
+              OLD.end_time != NEW.end_time OR
+              OLD.title != NEW.title OR
+              OLD.description != NEW.description OR
+              OLD.color != NEW.color OR
+              OLD.deleted_at != NEW.deleted_at
+            )
+          BEGIN
+            UPDATE schedule_blocks SET sync_status = 'pending' WHERE id = NEW.id;
+          END;
+        `);
+        console.log('✅ Schedule blocks table created successfully');
+      } else {
+        // Additive migration: Add specific_date column if it doesn't exist
+        const columnCheck = await this.db.getFirstAsync<any>(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='schedule_blocks'"
+        );
+        if (columnCheck && !columnCheck.sql.includes('specific_date')) {
+          console.log('📝 Adding specific_date column to schedule_blocks...');
+          await this.db.execAsync(`
+            ALTER TABLE schedule_blocks ADD COLUMN specific_date TEXT;
+          `);
+          console.log('✅ specific_date column added successfully');
         }
       }
     } catch (error) {
@@ -1127,6 +1197,170 @@ class DatabaseService {
   }
 
   // ============================================
+  // SCHEDULE BLOCK METHODS
+  // ============================================
+
+  async createScheduleBlock(input: CreateScheduleBlockInput): Promise<ScheduleBlock> {
+    const db = await this.getDatabase();
+    const result = await db.runAsync(
+      `INSERT INTO schedule_blocks (day_of_week, specific_date, start_time, end_time, title, description, color)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.day_of_week,
+        input.specific_date || null,
+        input.start_time,
+        input.end_time,
+        input.title,
+        input.description || null,
+        input.color || null,
+      ]
+    );
+
+    const block = await this.getScheduleBlockById(result.lastInsertRowId);
+    if (!block) throw new Error('Failed to create schedule block');
+    return block;
+  }
+
+  async getScheduleBlocks(): Promise<ScheduleBlock[]> {
+    const db = await this.getDatabase();
+    const rows = await db.getAllAsync<ScheduleBlock>(
+      `SELECT * FROM schedule_blocks 
+       WHERE deleted_at IS NULL 
+       ORDER BY day_of_week ASC, start_time ASC`
+    );
+    return rows;
+  }
+
+  async getScheduleBlocksByDay(dayOfWeek: number): Promise<ScheduleBlock[]> {
+    const db = await this.getDatabase();
+    const rows = await db.getAllAsync<ScheduleBlock>(
+      `SELECT * FROM schedule_blocks 
+       WHERE day_of_week = ? AND deleted_at IS NULL 
+       ORDER BY start_time ASC`,
+      [dayOfWeek]
+    );
+    return rows;
+  }
+
+  async getScheduleBlockById(id: number): Promise<ScheduleBlock | null> {
+    const db = await this.getDatabase();
+    const row = await db.getFirstAsync<ScheduleBlock>(
+      'SELECT * FROM schedule_blocks WHERE id = ? AND deleted_at IS NULL',
+      [id]
+    );
+    return row || null;
+  }
+
+  async updateScheduleBlock(id: number, input: UpdateScheduleBlockInput): Promise<ScheduleBlock> {
+    const db = await this.getDatabase();
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    if (input.day_of_week !== undefined) {
+      fields.push('day_of_week = ?');
+      values.push(input.day_of_week);
+    }
+    if (input.specific_date !== undefined) {
+      fields.push('specific_date = ?');
+      values.push(input.specific_date || null);
+    }
+    if (input.start_time !== undefined) {
+      fields.push('start_time = ?');
+      values.push(input.start_time);
+    }
+    if (input.end_time !== undefined) {
+      fields.push('end_time = ?');
+      values.push(input.end_time);
+    }
+    if (input.title !== undefined) {
+      fields.push('title = ?');
+      values.push(input.title);
+    }
+    if (input.description !== undefined) {
+      fields.push('description = ?');
+      values.push(input.description || null);
+    }
+    if (input.color !== undefined) {
+      fields.push('color = ?');
+      values.push(input.color || null);
+    }
+
+    if (fields.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    values.push(id);
+    await db.runAsync(
+      `UPDATE schedule_blocks SET ${fields.join(', ')} WHERE id = ?`,
+      values
+    );
+
+    const block = await this.getScheduleBlockById(id);
+    if (!block) throw new Error('Schedule block not found');
+    return block;
+  }
+
+  async deleteScheduleBlock(id: number): Promise<void> {
+    const db = await this.getDatabase();
+    await db.runAsync(
+      'UPDATE schedule_blocks SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [id]
+    );
+  }
+
+  async findSeriesBlocks(baseBlockId: number): Promise<ScheduleBlock[]> {
+    const db = await this.getDatabase();
+    
+    // Get the base block
+    const baseBlock = await this.getScheduleBlockById(baseBlockId);
+    if (!baseBlock) return [];
+    
+    // Find all blocks that match the series criteria
+    // (same start_time, end_time, title, color, and either all recurring or all one-time)
+    const rows = await db.getAllAsync<ScheduleBlock>(
+      `SELECT * FROM schedule_blocks 
+       WHERE deleted_at IS NULL 
+         AND start_time = ? 
+         AND end_time = ? 
+         AND title = ?
+         AND COALESCE(color, '') = COALESCE(?, '')
+         AND (
+           (specific_date IS NULL AND ? IS NULL) OR 
+           (specific_date IS NOT NULL AND ? IS NOT NULL)
+         )
+       ORDER BY day_of_week ASC`,
+      [
+        baseBlock.start_time,
+        baseBlock.end_time,
+        baseBlock.title,
+        baseBlock.color || '',
+        baseBlock.specific_date,
+        baseBlock.specific_date,
+      ]
+    );
+    
+    return rows;
+  }
+
+  async deleteScheduleBlockSeries(baseBlockId: number): Promise<void> {
+    const db = await this.getDatabase();
+    
+    // Get all blocks in the series
+    const seriesBlocks = await this.findSeriesBlocks(baseBlockId);
+    
+    // Delete all blocks in the series
+    const ids = seriesBlocks.map(b => b.id);
+    if (ids.length === 0) return;
+    
+    const placeholders = ids.map(() => '?').join(',');
+    await db.runAsync(
+      `UPDATE schedule_blocks SET deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+      ids
+    );
+  }
+
+
+  // ============================================
   // DASHBOARD STATS METHODS
   // ============================================
 
@@ -1450,6 +1684,7 @@ class DatabaseService {
       DROP TABLE IF EXISTS payments;
       DROP TABLE IF EXISTS expenses;
       DROP TABLE IF EXISTS todos;
+      DROP TABLE IF EXISTS schedule_blocks;
       DROP TABLE IF EXISTS app_metadata;
     `);
     

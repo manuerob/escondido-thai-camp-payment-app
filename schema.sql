@@ -111,6 +111,24 @@ CREATE TABLE IF NOT EXISTS todos (
 );
 
 -- ============================================
+-- SCHEDULE BLOCKS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS schedule_blocks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day_of_week INTEGER NOT NULL CHECK(day_of_week >= 0 AND day_of_week <= 6),
+  specific_date TEXT, -- For one-time blocks (e.g., "daily this week only")
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  color TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+  deleted_at TEXT
+);
+
+-- ============================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================
 
@@ -146,6 +164,11 @@ CREATE INDEX IF NOT EXISTS idx_expenses_sync_status ON expenses(sync_status) WHE
 CREATE INDEX IF NOT EXISTS idx_todos_checked ON todos(is_checked) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_todos_archived ON todos(is_archived) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_todos_sync_status ON todos(sync_status) WHERE deleted_at IS NULL;
+
+-- Schedule blocks indexes
+CREATE INDEX IF NOT EXISTS idx_schedule_blocks_day ON schedule_blocks(day_of_week) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_schedule_blocks_time ON schedule_blocks(day_of_week, start_time) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_schedule_blocks_sync_status ON schedule_blocks(sync_status) WHERE deleted_at IS NULL;
 
 -- ============================================
 -- APP METADATA TABLE
@@ -212,6 +235,15 @@ CREATE TRIGGER IF NOT EXISTS update_todos_updated_at
   WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
 BEGIN
   UPDATE todos SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Schedule blocks trigger
+CREATE TRIGGER IF NOT EXISTS update_schedule_blocks_updated_at
+  AFTER UPDATE ON schedule_blocks
+  FOR EACH ROW
+  WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+BEGIN
+  UPDATE schedule_blocks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- ============================================
@@ -316,6 +348,23 @@ CREATE TRIGGER IF NOT EXISTS reset_todos_sync_status
   )
 BEGIN
   UPDATE todos SET sync_status = 'pending' WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS reset_schedule_blocks_sync_status
+  AFTER UPDATE ON schedule_blocks
+  FOR EACH ROW
+  WHEN NEW.sync_status = 'synced' AND (
+    OLD.day_of_week != NEW.day_of_week OR
+    OLD.specific_date != NEW.specific_date OR
+    OLD.start_time != NEW.start_time OR
+    OLD.end_time != NEW.end_time OR
+    OLD.title != NEW.title OR
+    OLD.description != NEW.description OR
+    OLD.color != NEW.color OR
+    OLD.deleted_at != NEW.deleted_at
+  )
+BEGIN
+  UPDATE schedule_blocks SET sync_status = 'pending' WHERE id = NEW.id;
 END;
 
 -- ============================================
