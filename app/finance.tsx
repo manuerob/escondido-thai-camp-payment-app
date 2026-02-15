@@ -187,72 +187,77 @@ export default function FinanceScreen() {
         contentContainerStyle={[styles.content, isTablet && styles.tabletContent]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Today Revenue */}
-        <View style={[styles.statCard, styles.todayCard, isTablet && styles.tabletStatCard]}>
-          <View style={styles.statHeader}>
-            <Ionicons name="today-outline" size={isTablet ? 28 : 24} color="#3b82f6" />
+        {/* Summary Cards Grid */}
+        <View style={styles.statsGrid}>
+          {/* Today Revenue Card */}
+          <View style={[styles.statCard, isTablet && styles.tabletStatCard]}>
+            <View style={[styles.iconBadge, { backgroundColor: '#dbeafe' }]}>
+              <Ionicons name="today" size={isTablet ? 24 : 20} color="#2563eb" />
+            </View>
             <Text style={[styles.statLabel, isTablet && styles.tabletStatLabel]}>
               Today's Revenue
             </Text>
+            <Text style={[styles.statValue, isTablet && styles.tabletStatValue]}>
+              {formatCurrency(stats.todayRevenue)}
+            </Text>
           </View>
-          <Text style={[styles.statValue, isTablet && styles.tabletStatValue]}>
-            {formatCurrency(stats.todayRevenue)}
-          </Text>
-        </View>
 
-        {/* Monthly Revenue */}
-        <View style={[styles.statCard, styles.revenueCard, isTablet && styles.tabletStatCard]}>
-          <View style={styles.statHeader}>
-            <Ionicons name="trending-up" size={isTablet ? 28 : 24} color="#10b981" />
+          {/* Monthly Revenue Card */}
+          <View style={[styles.statCard, isTablet && styles.tabletStatCard]}>
+            <View style={[styles.iconBadge, { backgroundColor: '#d1fae5' }]}>
+              <Ionicons name="trending-up" size={isTablet ? 24 : 20} color="#10b981" />
+            </View>
             <Text style={[styles.statLabel, isTablet && styles.tabletStatLabel]}>
               Monthly Revenue
             </Text>
+            <Text style={[styles.statValue, isTablet && styles.tabletStatValue, { color: '#10b981' }]}>
+              {formatCurrency(stats.monthlyRevenue)}
+            </Text>
           </View>
-          <Text style={[styles.statValue, isTablet && styles.tabletStatValue]}>
-            {formatCurrency(stats.monthlyRevenue)}
-          </Text>
         </View>
 
-        {/* Monthly Expenses */}
-        <View style={[styles.statCard, styles.expensesCard, isTablet && styles.tabletStatCard]}>
-          <View style={styles.statHeader}>
-            <Ionicons name="trending-down" size={isTablet ? 28 : 24} color="#ef4444" />
+        <View style={styles.statsGrid}>
+          {/* Monthly Expenses Card */}
+          <View style={[styles.statCard, isTablet && styles.tabletStatCard]}>
+            <View style={[styles.iconBadge, { backgroundColor: '#fee2e2' }]}>
+              <Ionicons name="trending-down" size={isTablet ? 24 : 20} color="#ef4444" />
+            </View>
             <Text style={[styles.statLabel, isTablet && styles.tabletStatLabel]}>
               Monthly Expenses
             </Text>
-          </View>
-          <Text style={[styles.statValue, isTablet && styles.tabletStatValue]}>
-            {formatCurrency(stats.monthlyExpenses)}
-          </Text>
-        </View>
-
-        {/* Net Profit */}
-        <View
-          style={[
-            styles.statCard,
-            styles.profitCard,
-            isTablet && styles.tabletStatCard,
-            stats.netProfit < 0 && styles.lossCard,
-          ]}
-        >
-          <View style={styles.statHeader}>
-            <Ionicons
-              name={stats.netProfit >= 0 ? 'cash' : 'alert-circle'}
-              size={isTablet ? 28 : 24}
-              color="#fff"
-            />
-            <Text style={[styles.statLabel, styles.profitLabel, isTablet && styles.tabletStatLabel]}>
-              Net {stats.netProfit >= 0 ? 'Profit' : 'Loss'}
+            <Text style={[styles.statValue, isTablet && styles.tabletStatValue, { color: '#ef4444' }]}>
+              {formatCurrency(stats.monthlyExpenses)}
             </Text>
           </View>
-          <Text style={[styles.statValue, styles.profitValue, isTablet && styles.tabletStatValue]}>
-            {formatCurrency(Math.abs(stats.netProfit))}
-          </Text>
+
+          {/* Net Profit/Loss Card */}
+          <View style={[styles.statCard, isTablet && styles.tabletStatCard]}>
+            <View style={[
+              styles.iconBadge,
+              { backgroundColor: stats.netProfit >= 0 ? '#d1fae5' : '#fee2e2' }
+            ]}>
+              <Ionicons
+                name={stats.netProfit >= 0 ? 'cash' : 'alert-circle'}
+                size={isTablet ? 24 : 20}
+                color={stats.netProfit >= 0 ? '#10b981' : '#ef4444'}
+              />
+            </View>
+            <Text style={[styles.statLabel, isTablet && styles.tabletStatLabel]}>
+              Net {stats.netProfit >= 0 ? 'Profit' : 'Loss'}
+            </Text>
+            <Text style={[
+              styles.statValue,
+              isTablet && styles.tabletStatValue,
+              { color: stats.netProfit >= 0 ? '#10b981' : '#ef4444' }
+            ]}>
+              {formatCurrency(Math.abs(stats.netProfit))}
+            </Text>
+          </View>
         </View>
 
-        {/* Info Text */}
-        <View style={styles.infoBox}>
-          <Ionicons name="information-circle-outline" size={20} color="#6b7280" />
+        {/* Info Box */}
+        <View style={[styles.infoBox, isTablet && styles.tabletInfoBox]}>
+          <Ionicons name="information-circle" size={20} color="#2563eb" />
           <Text style={[styles.infoText, isTablet && styles.tabletInfoText]}>
             Financial data is calculated from completed payments and recorded expenses for the current month.
           </Text>
@@ -265,7 +270,7 @@ export default function FinanceScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8fafc',
   },
   scrollView: {
     flex: 1,
@@ -274,6 +279,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f8fafc',
   },
 
   // Header
@@ -283,21 +289,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#fff',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   tabletHeader: {
     paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingVertical: 20,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1f2937',
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111827',
   },
   tabletHeaderTitle: {
-    fontSize: 24,
+    fontSize: 26,
   },
   lockButton: {
     padding: 8,
@@ -388,81 +399,63 @@ const styles = StyleSheet.create({
 
   // Content
   content: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: 20,
+    paddingBottom: 40,
   },
   tabletContent: {
-    padding: 24,
-    maxWidth: 1000,
+    padding: 32,
+    maxWidth: 1200,
     alignSelf: 'center',
     width: '100%',
   },
 
+  // Stats Grid
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 16,
+  },
+
   // Stat Cards
   statCard: {
+    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.05,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 2,
   },
   tabletStatCard: {
-    padding: 28,
+    padding: 24,
     borderRadius: 20,
-    marginBottom: 20,
   },
-  todayCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#3b82f6',
-  },
-  revenueCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#10b981',
-  },
-  expensesCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: '#ef4444',
-  },
-  profitCard: {
-    backgroundColor: '#10b981',
-    borderLeftWidth: 0,
-  },
-  lossCard: {
-    backgroundColor: '#ef4444',
-  },
-  statHeader: {
-    flexDirection: 'row',
+  iconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
     marginBottom: 12,
   },
   statLabel: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
     color: '#6b7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginBottom: 8,
   },
   tabletStatLabel: {
-    fontSize: 16,
-  },
-  profitLabel: {
-    color: '#fff',
+    fontSize: 14,
   },
   statValue: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: '700',
-    color: '#1f2937',
+    color: '#111827',
   },
   tabletStatValue: {
-    fontSize: 40,
-  },
-  profitValue: {
-    color: '#fff',
+    fontSize: 28,
   },
 
   // Info Box
@@ -470,18 +463,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    backgroundColor: '#f9fafb',
+    backgroundColor: '#eff6ff',
     padding: 16,
     borderRadius: 12,
-    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#2563eb',
+  },
+  tabletInfoBox: {
+    padding: 20,
   },
   infoText: {
     flex: 1,
     fontSize: 13,
-    color: '#6b7280',
-    lineHeight: 20,
+    color: '#1e40af',
+    lineHeight: 18,
   },
   tabletInfoText: {
-    fontSize: 15,
+    fontSize: 14,
+    lineHeight: 20,
   },
 });
