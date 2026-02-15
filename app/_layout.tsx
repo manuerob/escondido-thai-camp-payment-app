@@ -83,6 +83,16 @@ export default function DrawerLayout() {
           }}
         />
         <Drawer.Screen
+          name="todo"
+          options={{
+            drawerLabel: 'Todo',
+            title: 'To Do List',
+            drawerIcon: ({ color, size }: { color: string; size: number }) => (
+              <Ionicons name="checkbox-outline" size={size} color={color} />
+            ),
+          }}
+        />
+        <Drawer.Screen
           name="finance"
           options={{
             drawerLabel: 'Finance',

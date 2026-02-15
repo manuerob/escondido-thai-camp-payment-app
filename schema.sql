@@ -96,6 +96,21 @@ CREATE TABLE IF NOT EXISTS expenses (
 );
 
 -- ============================================
+-- TODOS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS todos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  is_checked INTEGER NOT NULL DEFAULT 0 CHECK(is_checked IN (0, 1)),
+  completed_at TEXT,
+  is_archived INTEGER NOT NULL DEFAULT 0 CHECK(is_archived IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+  deleted_at TEXT
+);
+
+-- ============================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================
 
@@ -126,6 +141,11 @@ CREATE INDEX IF NOT EXISTS idx_payments_sync_status ON payments(sync_status) WHE
 CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_expenses_sync_status ON expenses(sync_status) WHERE deleted_at IS NULL;
+
+-- Todos indexes
+CREATE INDEX IF NOT EXISTS idx_todos_checked ON todos(is_checked) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_todos_archived ON todos(is_archived) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_todos_sync_status ON todos(sync_status) WHERE deleted_at IS NULL;
 
 -- ============================================
 -- APP METADATA TABLE
@@ -183,6 +203,15 @@ CREATE TRIGGER IF NOT EXISTS update_expenses_updated_at
   WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
 BEGIN
   UPDATE expenses SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Todos trigger
+CREATE TRIGGER IF NOT EXISTS update_todos_updated_at
+  AFTER UPDATE ON todos
+  FOR EACH ROW
+  WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+BEGIN
+  UPDATE todos SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- ============================================
@@ -273,6 +302,20 @@ CREATE TRIGGER IF NOT EXISTS reset_expenses_sync_status
   )
 BEGIN
   UPDATE expenses SET sync_status = 'pending' WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS reset_todos_sync_status
+  AFTER UPDATE ON todos
+  FOR EACH ROW
+  WHEN NEW.sync_status = 'synced' AND (
+    OLD.title != NEW.title OR
+    OLD.is_checked != NEW.is_checked OR
+    OLD.completed_at != NEW.completed_at OR
+    OLD.is_archived != NEW.is_archived OR
+    OLD.deleted_at != NEW.deleted_at
+  )
+BEGIN
+  UPDATE todos SET sync_status = 'pending' WHERE id = NEW.id;
 END;
 
 -- ============================================

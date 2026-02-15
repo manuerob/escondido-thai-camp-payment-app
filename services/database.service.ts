@@ -6,6 +6,7 @@ import type {
   Subscription,
   Payment,
   Expense,
+  Todo,
   CreateMemberInput,
   UpdateMemberInput,
   CreatePackageInput,
@@ -16,6 +17,8 @@ import type {
   UpdatePaymentInput,
   CreateExpenseInput,
   UpdateExpenseInput,
+  CreateTodoInput,
+  UpdateTodoInput,
   PaginationParams,
   DateRangeFilter,
   MemberWithSubscription,
@@ -104,10 +107,71 @@ class DatabaseService {
           DROP TABLE IF EXISTS subscriptions;
           DROP TABLE IF EXISTS payments;
           DROP TABLE IF EXISTS expenses;
+          DROP TABLE IF EXISTS todos;
           DROP TABLE IF EXISTS app_metadata;
         `);
         
         console.log('✅ Database migration completed');
+      }
+
+      // Check if todos table exists, create it if it doesn't (additive migration)
+      const todosResult = await this.db.getFirstAsync<any>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='todos'"
+      );
+
+      if (!todosResult) {
+        console.log('📝 Creating todos table...');
+        await this.db.execAsync(`
+          CREATE TABLE IF NOT EXISTS todos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            is_checked INTEGER NOT NULL DEFAULT 0 CHECK(is_checked IN (0, 1)),
+            completed_at TEXT,
+            is_archived INTEGER NOT NULL DEFAULT 0 CHECK(is_archived IN (0, 1)),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+            deleted_at TEXT
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_todos_checked ON todos(is_checked) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_todos_archived ON todos(is_archived) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_todos_sync_status ON todos(sync_status) WHERE deleted_at IS NULL;
+
+          CREATE TRIGGER IF NOT EXISTS update_todos_updated_at
+            AFTER UPDATE ON todos
+            FOR EACH ROW
+            WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+          BEGIN
+            UPDATE todos SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+          END;
+
+          CREATE TRIGGER IF NOT EXISTS reset_todos_sync_status
+            AFTER UPDATE ON todos
+            FOR EACH ROW
+            WHEN NEW.sync_status = 'synced' AND (
+              OLD.title != NEW.title OR
+              OLD.is_checked != NEW.is_checked OR
+              OLD.completed_at != NEW.completed_at OR
+              OLD.is_archived != NEW.is_archived OR
+              OLD.deleted_at != NEW.deleted_at
+            )
+          BEGIN
+            UPDATE todos SET sync_status = 'pending' WHERE id = NEW.id;
+          END;
+        `);
+        console.log('✅ Todos table created successfully');
+      } else {
+        // Check if completed_at column exists
+        const tableInfo = await this.db.getFirstAsync<any>(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='todos'"
+        );
+        
+        if (tableInfo?.sql && !tableInfo.sql.includes('completed_at')) {
+          console.log('📝 Adding completed_at column to todos table...');
+          await this.db.execAsync('ALTER TABLE todos ADD COLUMN completed_at TEXT');
+          console.log('✅ completed_at column added');
+        }
       }
     } catch (error) {
       // Table doesn't exist yet, that's fine
@@ -932,6 +996,137 @@ class DatabaseService {
   }
 
   // ============================================
+  // TODO METHODS
+  // ============================================
+
+  async createTodo(input: CreateTodoInput): Promise<Todo> {
+    const db = await this.getDatabase();
+    const result = await db.runAsync(
+      `INSERT INTO todos (title, is_checked, is_archived)
+       VALUES (?, ?, ?)`,
+      [
+        input.title,
+        input.is_checked ? 1 : 0,
+        input.is_archived ? 1 : 0,
+      ]
+    );
+
+    const todo = await this.getTodoById(result.lastInsertRowId);
+    if (!todo) throw new Error('Failed to create todo');
+    return todo;
+  }
+
+  async getTodos(includeArchived: boolean = false): Promise<Todo[]> {
+    const db = await this.getDatabase();
+    
+    // Auto-archive completed todos older than 7 days
+    await db.runAsync(`
+      UPDATE todos 
+      SET is_archived = 1 
+      WHERE is_checked = 1 
+        AND completed_at IS NOT NULL 
+        AND is_archived = 0 
+        AND deleted_at IS NULL
+        AND DATE(completed_at) <= DATE('now', '-7 days')
+    `);
+
+    const query = includeArchived
+      ? `SELECT * FROM todos WHERE deleted_at IS NULL ORDER BY created_at DESC`
+      : `SELECT * FROM todos WHERE is_archived = 0 AND deleted_at IS NULL ORDER BY is_checked ASC, created_at DESC`;
+
+    const rows = await db.getAllAsync<any>(query);
+    return rows.map(row => ({
+      ...row,
+      is_checked: Boolean(row.is_checked),
+      is_archived: Boolean(row.is_archived),
+    }));
+  }
+
+  async getTodoById(id: number): Promise<Todo | null> {
+    const db = await this.getDatabase();
+    const row = await db.getFirstAsync<any>(
+      'SELECT * FROM todos WHERE id = ? AND deleted_at IS NULL',
+      [id]
+    );
+    if (!row) return null;
+    return {
+      ...row,
+      is_checked: Boolean(row.is_checked),
+      is_archived: Boolean(row.is_archived),
+      completed_at: row.completed_at || null,
+    };
+  }
+
+  async updateTodo(id: number, input: UpdateTodoInput): Promise<Todo> {
+    const db = await this.getDatabase();
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    if (input.title !== undefined) {
+      fields.push('title = ?');
+      values.push(input.title);
+    }
+    if (input.is_checked !== undefined) {
+      fields.push('is_checked = ?');
+      values.push(input.is_checked ? 1 : 0);
+    }
+    if (input.is_archived !== undefined) {
+      fields.push('is_archived = ?');
+      values.push(input.is_archived ? 1 : 0);
+    }
+
+    if (fields.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    values.push(id);
+    await db.runAsync(
+      `UPDATE todos SET ${fields.join(', ')} WHERE id = ?`,
+      values
+    );
+
+    const todo = await this.getTodoById(id);
+    if (!todo) throw new Error('Todo not found');
+    return todo;
+  }
+
+  async deleteTodo(id: number): Promise<void> {
+    const db = await this.getDatabase();
+    await db.runAsync(
+      'UPDATE todos SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [id]
+    );
+  }
+
+  async toggleTodoCheck(id: number): Promise<Todo> {
+    const todo = await this.getTodoById(id);
+    if (!todo) throw new Error('Todo not found');
+    
+    const db = await this.getDatabase();
+    
+    // If checking the todo, set completed_at; if unchecking, clear it
+    if (!todo.is_checked) {
+      await db.runAsync(
+        'UPDATE todos SET is_checked = 1, completed_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [id]
+      );
+    } else {
+      await db.runAsync(
+        'UPDATE todos SET is_checked = 0, completed_at = NULL WHERE id = ?',
+        [id]
+      );
+    }
+    
+    const updatedTodo = await this.getTodoById(id);
+    if (!updatedTodo) throw new Error('Todo not found');
+    return updatedTodo;
+  }
+
+  async archiveTodo(id: number): Promise<Todo> {
+    return this.updateTodo(id, { is_archived: true });
+  }
+
+  // ============================================
   // DASHBOARD STATS METHODS
   // ============================================
 
@@ -1254,6 +1449,7 @@ class DatabaseService {
       DROP TABLE IF EXISTS subscriptions;
       DROP TABLE IF EXISTS payments;
       DROP TABLE IF EXISTS expenses;
+      DROP TABLE IF EXISTS todos;
       DROP TABLE IF EXISTS app_metadata;
     `);
     

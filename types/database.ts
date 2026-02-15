@@ -200,6 +200,29 @@ export interface UpdateExpenseInput {
 }
 
 // ============================================
+// TODO INTERFACE
+// ============================================
+
+export interface Todo extends BaseEntity {
+  title: string;
+  is_checked: boolean;
+  completed_at: string | null;
+  is_archived: boolean;
+}
+
+export interface CreateTodoInput {
+  title: string;
+  is_checked?: boolean;
+  is_archived?: boolean;
+}
+
+export interface UpdateTodoInput {
+  title?: string;
+  is_checked?: boolean;
+  is_archived?: boolean;
+}
+
+// ============================================
 // JOINED DATA INTERFACES
 // ============================================
 
