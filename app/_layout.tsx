@@ -129,27 +129,6 @@ export default function DrawerLayout() {
             title: 'Member Details',
           }}
         />
-        <Drawer.Screen
-          name="add-expense"
-          options={{
-            drawerItemStyle: { display: 'none' },
-            title: 'Add Expense',
-          }}
-        />
-        <Drawer.Screen
-          name="add-member"
-          options={{
-            drawerItemStyle: { display: 'none' },
-            title: 'Add Member',
-          }}
-        />
-        <Drawer.Screen
-          name="(modals)"
-          options={{
-            drawerItemStyle: { display: 'none' },
-            headerShown: false,
-          }}
-        />
       </Drawer>
     </GestureHandlerRootView>
     </SafeAreaProvider>
