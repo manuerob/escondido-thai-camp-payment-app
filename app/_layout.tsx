@@ -117,6 +117,13 @@ export default function DrawerLayout() {
           }}
         />
         <Drawer.Screen
+          name="add-member"
+          options={{
+            drawerItemStyle: { display: 'none' },
+            title: 'Add Member',
+          }}
+        />
+        <Drawer.Screen
           name="(modals)"
           options={{
             drawerItemStyle: { display: 'none' },

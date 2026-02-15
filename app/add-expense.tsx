@@ -29,6 +29,7 @@ export default function AddExpenseScreen() {
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [madeBy, setMadeBy] = useState('');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<string[]>(['Equipment', 'Utilities', 'Rent', 'Supplies', 'Maintenance', 'Marketing', 'Staff', 'Other']);
@@ -108,6 +109,7 @@ export default function AddExpenseScreen() {
         expense_date: date,
         description,
         payment_method: paymentMethod,
+        vendor: madeBy.trim() || undefined,
       });
 
       console.log('Expense created successfully:', expense);
@@ -288,6 +290,20 @@ export default function AddExpenseScreen() {
           <Text style={[styles.hint, isTablet && styles.tabletHint]}>
             Format: YYYY-MM-DD (e.g., 2026-02-14)
           </Text>
+        </View>
+
+        {/* Made By Input */}
+        <View style={styles.section}>
+          <Text style={[styles.label, isTablet && styles.tabletLabel]}>
+            Made By
+          </Text>
+          <TextInput
+            style={[styles.input, isTablet && styles.tabletInput]}
+            placeholder="e.g., John Doe"
+            placeholderTextColor="#9ca3af"
+            value={madeBy}
+            onChangeText={setMadeBy}
+          />
         </View>
 
         {/* Notes Input */}

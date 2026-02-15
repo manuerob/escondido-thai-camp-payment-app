@@ -43,6 +43,7 @@ export default function ExpensesScreen() {
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [madeBy, setMadeBy] = useState('');
   const [notes, setNotes] = useState('');
   const [showNotes, setShowNotes] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -133,6 +134,7 @@ export default function ExpensesScreen() {
     setCategory('');
     setAmount('');
     setPaymentMethod('cash');
+    setMadeBy('');
     setNotes('');
     setShowNotes(false);
   };
@@ -143,6 +145,10 @@ export default function ExpensesScreen() {
 
   const handleSave = async () => {
     // Validation
+    if (!title.trim()) {
+      Alert.alert('Validation Error', 'Title is required');
+      return;
+    }
     if (!category) {
       Alert.alert('Validation Error', 'Please select a category');
       return;
@@ -155,11 +161,9 @@ export default function ExpensesScreen() {
     try {
       setSaving(true);
 
-      // Auto-generate description from category if title is empty
-      const finalTitle = title.trim() || `${category.charAt(0).toUpperCase() + category.slice(1)} expense`;
       const description = notes.trim() 
-        ? `${finalTitle}\n\n${notes.trim()}`
-        : finalTitle;
+        ? `${title.trim()}\n\n${notes.trim()}`
+        : title.trim();
 
       await databaseService.createExpense({
         category,
@@ -167,6 +171,7 @@ export default function ExpensesScreen() {
         expense_date: new Date().toISOString(),
         description,
         payment_method: paymentMethod,
+        vendor: madeBy.trim() || undefined,
       });
 
       setIsModalVisible(false);
@@ -210,19 +215,30 @@ export default function ExpensesScreen() {
     return colors[category] || '#6b7280';
   };
 
-  const renderExpenseItem = ({ item }: { item: Expense }) => (
-    <View style={[styles.expenseCard, isTablet && styles.tabletExpenseCard]}>
-      <View style={styles.expenseHeader}>
-        <View style={styles.titleContainer}>
-          <Text style={[styles.expenseTitle, isTablet && styles.tabletExpenseTitle]}>
-            {item.description || 'Expense'}
-          </Text>
-          {item.vendor && (
-            <Text style={[styles.vendor, isTablet && styles.tabletVendor]}>
-              {item.vendor}
+  const renderExpenseItem = ({ item }: { item: Expense }) => {
+    // Split description into title and notes (separated by \n\n)
+    const parts = (item.description || 'Expense').split('\n\n');
+    const title = parts[0];
+    const note = parts.length > 1 ? parts.slice(1).join('\n\n') : null;
+
+    return (
+      <View style={[styles.expenseCard, isTablet && styles.tabletExpenseCard]}>
+        <View style={styles.expenseHeader}>
+          <View style={styles.titleContainer}>
+            <Text style={[styles.expenseTitle, isTablet && styles.tabletExpenseTitle]}>
+              {title}
             </Text>
-          )}
-        </View>
+            {note && (
+              <Text style={[styles.expenseNote, isTablet && styles.tabletExpenseNote]}>
+                {note}
+              </Text>
+            )}
+            {item.vendor && (
+              <Text style={[styles.vendor, isTablet && styles.tabletVendor]}>
+                {item.vendor}
+              </Text>
+            )}
+          </View>
         <View
           style={[
             styles.categoryBadge,
@@ -251,7 +267,8 @@ export default function ExpensesScreen() {
         </View>
       </View>
     </View>
-  );
+    );
+  };
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
@@ -396,14 +413,14 @@ export default function ExpensesScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* Title Input (Optional) */}
+              {/* Title Input */}
               <View style={styles.formSection}>
                 <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                  Title <Text style={styles.optional}>(optional - auto-generated if blank)</Text>
+                  Title <Text style={styles.required}>*</Text>
                 </Text>
                 <TextInput
                   style={[styles.input, isTablet && styles.tabletInput]}
-                  placeholder="Auto-filled from category"
+                  placeholder="e.g., New equipment purchase"
                   placeholderTextColor="#9ca3af"
                   value={title}
                   onChangeText={setTitle}
@@ -501,6 +518,20 @@ export default function ExpensesScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+              </View>
+
+              {/* Made By Input */}
+              <View style={styles.formSection}>
+                <Text style={[styles.label, isTablet && styles.tabletLabel]}>
+                  Made By
+                </Text>
+                <TextInput
+                  style={[styles.input, isTablet && styles.tabletInput]}
+                  placeholder="e.g., John Doe"
+                  placeholderTextColor="#9ca3af"
+                  value={madeBy}
+                  onChangeText={setMadeBy}
+                />
               </View>
 
               {/* Notes Input (Collapsible) */}
@@ -710,6 +741,15 @@ const styles = StyleSheet.create({
   },
   tabletExpenseTitle: {
     fontSize: 18,
+  },
+  expenseNote: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  tabletExpenseNote: {
+    fontSize: 16,
   },
   vendor: {
     fontSize: 13,

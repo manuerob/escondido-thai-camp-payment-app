@@ -102,6 +102,8 @@ export interface Subscription extends BaseEntity {
   sessions_remaining: number | null;
   auto_renew: boolean;
   notes: string | null;
+  package_name?: string;
+  package_price?: number;
 }
 
 export interface CreateSubscriptionInput {

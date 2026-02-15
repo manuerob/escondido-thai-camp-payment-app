@@ -338,6 +338,11 @@ export default function MemberDetailScreen() {
                       {formatDate(sub.created_at)}
                     </Text>
                   </View>
+                  {sub.package_name && (
+                    <Text style={[styles.historyPackage, isTablet && styles.tabletHistoryPackage]}>
+                      {sub.package_name} • {formatCurrency(sub.package_price || 0)}
+                    </Text>
+                  )}
                   <Text style={[styles.historyDetail, isTablet && styles.tabletHistoryDetail]}>
                     {formatDate(sub.start_date)} - {formatDate(sub.end_date)}
                   </Text>
@@ -627,9 +632,19 @@ const styles = StyleSheet.create({
   tabletHistoryDate: {
     fontSize: 14,
   },
+  historyPackage: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2563eb',
+    marginTop: 4,
+  },
+  tabletHistoryPackage: {
+    fontSize: 16,
+  },
   historyDetail: {
     fontSize: 13,
     color: '#374151',
+    marginTop: 4,
   },
   tabletHistoryDetail: {
     fontSize: 15,

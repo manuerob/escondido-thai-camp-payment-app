@@ -562,9 +562,11 @@ class DatabaseService {
   async getSubscriptionsByMember(memberId: number): Promise<Subscription[]> {
     const db = await this.getDatabase();
     return await db.getAllAsync<Subscription>(
-      `SELECT * FROM subscriptions 
-       WHERE member_id = ? AND deleted_at IS NULL 
-       ORDER BY start_date DESC`,
+      `SELECT s.*, p.name as package_name, p.price as package_price
+       FROM subscriptions s
+       LEFT JOIN packages p ON s.package_id = p.id
+       WHERE s.member_id = ? AND s.deleted_at IS NULL 
+       ORDER BY s.start_date DESC`,
       [memberId]
     );
   }
@@ -774,9 +776,12 @@ class DatabaseService {
       SELECT 
         p.*,
         (m.first_name || ' ' || m.last_name) as member_name,
-        m.email as member_email
+        m.email as member_email,
+        pkg.name as package_name
       FROM payments p
       LEFT JOIN members m ON p.member_id = m.id
+      LEFT JOIN subscriptions s ON p.subscription_id = s.id
+      LEFT JOIN packages pkg ON s.package_id = pkg.id
       WHERE p.deleted_at IS NULL
     `;
     const params: any[] = [];
@@ -1063,7 +1068,7 @@ class DatabaseService {
           ORDER BY created_at DESC 
           LIMIT 1
         )
-      LEFT JOIN packages p ON s.package_id = p.id AND p.deleted_at IS NULL
+      LEFT JOIN packages p ON s.package_id = p.id
       WHERE m.deleted_at IS NULL ${statusFilter}
       ORDER BY m.first_name ASC, m.last_name ASC`
     );
@@ -1102,7 +1107,7 @@ class DatabaseService {
           ORDER BY created_at DESC 
           LIMIT 1
         )
-      LEFT JOIN packages p ON s.package_id = p.id AND p.deleted_at IS NULL
+      LEFT JOIN packages p ON s.package_id = p.id
       WHERE m.deleted_at IS NULL 
         AND (m.first_name LIKE ? OR m.last_name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.instagram LIKE ?)
         ${statusFilter}

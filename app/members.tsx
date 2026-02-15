@@ -48,11 +48,11 @@ export default function MembersScreen() {
   const [isModalVisible, setIsModalVisible] = useState(false);
   
   // Form state
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [fullName, setFullName] = useState('');  const [phone, setPhone] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [instagram, setInstagram] = useState('');
+  const [showContactDetails, setShowContactDetails] = useState(false);
   
   // Package/payment state
   const [packages, setPackages] = useState<Package[]>([]);
@@ -62,8 +62,6 @@ export default function MembersScreen() {
   
   const [saving, setSaving] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
-  const [quickMode, setQuickMode] = useState(true);
-  const [showContactDetails, setShowContactDetails] = useState(false);
 
   // Load members when screen comes into focus or filter/search changes
   useFocusEffect(
@@ -164,10 +162,6 @@ export default function MembersScreen() {
       setLoadingPackages(true);
       const data = await databaseService.getActivePackages();
       setPackages(data);
-      // Auto-select first package in quick mode
-      if (data.length > 0 && !selectedPackageId) {
-        setSelectedPackageId(data[0].id);
-      }
     } catch (error) {
       console.error('Error loading packages:', error);
     } finally {
@@ -180,17 +174,14 @@ export default function MembersScreen() {
     Keyboard.dismiss();
     
     // Reset form
-    setFirstName('');
-    setLastName('');
     setFullName('');
     setPhone('');
     setEmail('');
     setInstagram('');
+    setShowContactDetails(false);
     setSelectedPackageId(null);
     setPaymentMethod('cash');
     setPaymentStatus('completed');
-    setQuickMode(true);
-    setShowContactDetails(false);
     
     // Load packages and show modal
     loadPackages();
@@ -202,34 +193,24 @@ export default function MembersScreen() {
   };
 
   const handleSave = async () => {
-    // Parse name in quick mode
-    if (quickMode && fullName.trim()) {
-      const parts = fullName.trim().split(' ');
-      if (parts.length === 1) {
-        setFirstName(parts[0]);
-        setLastName(parts[0]);  // Use same for both if only one name provided
-      } else {
-        setFirstName(parts[0]);
-        setLastName(parts.slice(1).join(' '));
-      }
-    }
-
     // Validation
-    const fName = quickMode ? fullName.trim().split(' ')[0] || '' : firstName.trim();
-    const lName = quickMode ? (fullName.trim().split(' ').slice(1).join(' ') || fullName.trim().split(' ')[0] || '') : lastName.trim();
-    
-    if (!fName) {
-      Alert.alert('Validation Error', quickMode ? 'Name is required' : 'First name is required');
+    if (!fullName.trim()) {
+      Alert.alert('Validation Error', 'Name is required');
       return;
     }
+
+    // Parse name into first and last
+    const parts = fullName.trim().split(' ');
+    const firstName = parts[0];
+    const lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
 
     try {
       setSaving(true);
 
       // 1. Create member
       const member = await databaseService.createMember({
-        first_name: fName,
-        last_name: lName,
+        first_name: firstName,
+        last_name: lastName, // Empty string if single name
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
         instagram: instagram.trim() || undefined,
@@ -673,83 +654,27 @@ export default function MembersScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* Quick Mode Toggle */}
-              <View style={styles.modeToggle}>
-                <TouchableOpacity
-                  style={[styles.modeButton, quickMode && styles.modeButtonActive]}
-                  onPress={() => setQuickMode(true)}
-                >
-                  <Ionicons name="flash" size={18} color={quickMode ? '#2563eb' : '#6b7280'} />
-                  <Text style={[styles.modeButtonText, quickMode && styles.modeButtonTextActive]}>
-                    Quick Add
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modeButton, !quickMode && styles.modeButtonActive]}
-                  onPress={() => setQuickMode(false)}
-                >
-                  <Ionicons name="list" size={18} color={!quickMode ? '#2563eb' : '#6b7280'} />
-                  <Text style={[styles.modeButtonText, !quickMode && styles.modeButtonTextActive]}>
-                    Full Details
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
               {/* Member Information Section */}
               <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle]}>
                 Member Information
               </Text>
 
-              {quickMode ? (
-                /* Quick Mode: Single Name Field */
-                <View style={styles.formSection}>
-                  <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                    Name <Text style={styles.required}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={[styles.input, isTablet && styles.tabletInput]}
-                    placeholder="Full name"
-                    placeholderTextColor="#9ca3af"
-                    value={fullName}
-                    onChangeText={setFullName}
-                    autoFocus
-                  />
-                </View>
-              ) : (
-                /* Full Mode: Separate Name Fields */
-                <>
-                  <View style={styles.row}>
-                    <View style={[styles.formSection, { flex: 1, marginRight: 8 }]}>
-                      <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                        First Name <Text style={styles.required}>*</Text>
-                      </Text>
-                      <TextInput
-                        style={[styles.input, isTablet && styles.tabletInput]}
-                        placeholder="First name"
-                        placeholderTextColor="#9ca3af"
-                        value={firstName}
-                        onChangeText={setFirstName}
-                      />
-                    </View>
+              <View style={styles.formSection}>
+                <Text style={[styles.label, isTablet && styles.tabletLabel]}>
+                  Name <Text style={styles.required}>*</Text>
+                </Text>
+                <TextInput
+                  style={[styles.input, isTablet && styles.tabletInput]}
+                  placeholder="Full name"
+                  placeholderTextColor="#9ca3af"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  autoFocus
+                />
+              </View>
 
-                    <View style={[styles.formSection, { flex: 1, marginLeft: 8 }]}>
-                      <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                        Last Name <Text style={styles.required}>*</Text>
-                      </Text>
-                      <TextInput
-                        style={[styles.input, isTablet && styles.tabletInput]}
-                        placeholder="Last name"
-                        placeholderTextColor="#9ca3af"
-                        value={lastName}
-                        onChangeText={setLastName}
-                      />
-                    </View>
-                  </View>
-                </>
-              )}
-
-              {/* Contact Fields - Collapsible in Quick Mode */}
-              {quickMode && !showContactDetails ? (
+              {/* Contact Fields - Collapsible */}
+              {!showContactDetails ? (
                 <TouchableOpacity
                   style={styles.addContactButton}
                   onPress={() => setShowContactDetails(true)}
@@ -757,7 +682,7 @@ export default function MembersScreen() {
                   <Ionicons name="add-circle-outline" size={20} color="#2563eb" />
                   <Text style={styles.addContactText}>Add contact details (optional)</Text>
                 </TouchableOpacity>
-              ) : !quickMode || showContactDetails ? (
+              ) : (
                 <>
                   <View style={styles.formSection}>
                     <Text style={[styles.label, isTablet && styles.tabletLabel]}>Phone</Text>
@@ -796,7 +721,7 @@ export default function MembersScreen() {
                     />
                   </View>
                 </>
-              ) : null}
+              )}
 
               {/* Package Selection Section */}
               <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
@@ -840,78 +765,74 @@ export default function MembersScreen() {
                 </View>
               )}
 
-              {/* Payment Details (if package selected) */}
-              {selectedPackageId && (
-                <>
-                  <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
-                    Payment Details
-                  </Text>
+              {/* Payment Details */}
+              <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
+                Payment Details
+              </Text>
 
-                  <View style={styles.formSection}>
-                    <Text style={[styles.label, isTablet && styles.tabletLabel]}>Payment Method</Text>
-                    <View style={styles.paymentMethodGrid}>
-                      {PAYMENT_METHODS.map((method) => (
-                        <TouchableOpacity
-                          key={method}
-                          style={[
-                            styles.paymentMethodButton,
-                            isTablet && styles.tabletPaymentMethodButton,
-                            paymentMethod === method && styles.paymentMethodButtonActive,
-                          ]}
-                          onPress={() => setPaymentMethod(method)}
-                        >
-                          <Ionicons
-                            name={
-                              method === 'cash' ? 'cash-outline' :
-                              method === 'card' ? 'card-outline' :
-                              method === 'bank_transfer' ? 'business-outline' :
-                              'phone-portrait-outline'
-                            }
-                            size={isTablet ? 22 : 20}
-                            color={paymentMethod === method ? '#2563eb' : '#6b7280'}
-                          />
-                          <Text
-                            style={[
-                              styles.paymentMethodText,
-                              isTablet && styles.tabletPaymentMethodText,
-                              paymentMethod === method && styles.paymentMethodTextActive,
-                            ]}
-                          >
-                            {formatPaymentMethod(method)}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
+              <View style={styles.formSection}>
+                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Payment Method</Text>
+                <View style={styles.paymentMethodGrid}>
+                  {PAYMENT_METHODS.map((method) => (
+                    <TouchableOpacity
+                      key={method}
+                      style={[
+                        styles.paymentMethodButton,
+                        isTablet && styles.tabletPaymentMethodButton,
+                        paymentMethod === method && styles.paymentMethodButtonActive,
+                      ]}
+                      onPress={() => setPaymentMethod(method)}
+                    >
+                      <Ionicons
+                        name={
+                          method === 'cash' ? 'cash-outline' :
+                          method === 'card' ? 'card-outline' :
+                          method === 'bank_transfer' ? 'business-outline' :
+                          'phone-portrait-outline'
+                        }
+                        size={isTablet ? 22 : 20}
+                        color={paymentMethod === method ? '#2563eb' : '#6b7280'}
+                      />
+                      <Text
+                        style={[
+                          styles.paymentMethodText,
+                          isTablet && styles.tabletPaymentMethodText,
+                          paymentMethod === method && styles.paymentMethodTextActive,
+                        ]}
+                      >
+                        {formatPaymentMethod(method)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
 
-                  <View style={styles.formSection}>
-                    <Text style={[styles.label, isTablet && styles.tabletLabel]}>Payment Status</Text>
-                    <View style={styles.paymentStatusRow}>
-                      {PAYMENT_STATUSES.map((status) => (
-                        <TouchableOpacity
-                          key={status}
-                          style={[
-                            styles.statusButton,
-                            isTablet && styles.tabletStatusButton,
-                            paymentStatus === status && styles.statusButtonActive,
-                          ]}
-                          onPress={() => setPaymentStatus(status)}
-                        >
-                          <Text
-                            style={[
-                              styles.statusButtonText,
-                              isTablet && styles.tabletStatusButtonText,
-                              paymentStatus === status && styles.statusButtonTextActive,
-                            ]}
-                          >
-                            {status.charAt(0).toUpperCase() + status.slice(1)}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                </>
-              )}
+              <View style={styles.formSection}>
+                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Payment Status</Text>
+                <View style={styles.paymentStatusRow}>
+                  {PAYMENT_STATUSES.map((status) => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.statusButton,
+                        isTablet && styles.tabletStatusButton,
+                        paymentStatus === status && styles.statusButtonActive,
+                      ]}
+                      onPress={() => setPaymentStatus(status)}
+                    >
+                      <Text
+                        style={[
+                          styles.statusButtonText,
+                          isTablet && styles.tabletStatusButtonText,
+                          paymentStatus === status && styles.statusButtonTextActive,
+                        ]}
+                      >
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
 
               {/* Save Button */}
               <TouchableOpacity
