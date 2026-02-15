@@ -15,33 +15,27 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
+import { useCurrency } from '../hooks';
 import type { Expense, PaymentMethod } from '../types/database';
-
-const CATEGORIES = [
-  'Equipment',
-  'Utilities',
-  'Rent',
-  'Supplies',
-  'Maintenance',
-  'Marketing',
-  'Staff',
-  'Other',
-];
-
-const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'card', 'bank_transfer', 'digital_wallet'];
 
 export default function ExpensesScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const router = useRouter();
+  const { formatCurrency, getCurrencySymbol } = useCurrency();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [filteredExpenses, setFilteredExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [categories, setCategories] = useState<string[]>(['Equipment', 'Utilities', 'Rent', 'Supplies', 'Maintenance', 'Marketing', 'Staff', 'Other']);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(['cash', 'card', 'bank_transfer', 'digital_wallet']);
   
   // Modal state
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -49,16 +43,49 @@ export default function ExpensesScreen() {
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
+  const [showNotes, setShowNotes] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Load expenses when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       loadExpenses();
+      loadSettings();
     }, [])
   );
+
+  const loadSettings = async () => {
+    try {
+      const savedCategories = await AsyncStorage.getItem('expense_categories');
+      if (savedCategories) {
+        const cats = JSON.parse(savedCategories);
+        // Filter out any invalid values
+        const validCategories = cats.filter((c: any) => typeof c === 'string' && c.trim().length > 0);
+        if (validCategories.length > 0) {
+          setCategories(validCategories);
+        }
+      }
+
+      const savedPaymentMethods = await AsyncStorage.getItem('payment_methods');
+      if (savedPaymentMethods) {
+        const methods = JSON.parse(savedPaymentMethods);
+        // Handle migration from objects to strings
+        const validMethods = methods
+          .map((m: any) => {
+            if (typeof m === 'string') return m;
+            if (typeof m === 'object' && m.id) return m.id;
+            return null;
+          })
+          .filter((m: any) => m && typeof m === 'string' && m.trim().length > 0);
+        if (validMethods.length > 0) {
+          setPaymentMethods(validMethods as PaymentMethod[]);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  };
 
   const loadExpenses = async () => {
     try {
@@ -67,12 +94,30 @@ export default function ExpensesScreen() {
       const data = await databaseService.getExpensesByDateRange({});
       console.log('Expenses loaded:', data.length, 'items');
       setExpenses(data);
+      filterExpenses(data, categoryFilter);
     } catch (error) {
       console.error('Error loading expenses:', error);
       Alert.alert('Error', 'Failed to load expenses');
     } finally {
       setLoading(false);
     }
+  };
+
+  const filterExpenses = (data: Expense[], filter: string) => {
+    if (filter === 'all') {
+      setFilteredExpenses(data);
+    } else {
+      setFilteredExpenses(data.filter(e => e.category === filter));
+    }
+  };
+
+  // Update filter
+  useEffect(() => {
+    filterExpenses(expenses, categoryFilter);
+  }, [categoryFilter]);
+
+  const getTotalAmount = (): number => {
+    return filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
   };
 
   const handleRefresh = async () => {
@@ -88,8 +133,8 @@ export default function ExpensesScreen() {
     setCategory('');
     setAmount('');
     setPaymentMethod('cash');
-    setDate(new Date().toISOString().split('T')[0]);
     setNotes('');
+    setShowNotes(false);
   };
 
   const handleCloseModal = () => {
@@ -98,10 +143,6 @@ export default function ExpensesScreen() {
 
   const handleSave = async () => {
     // Validation
-    if (!title.trim()) {
-      Alert.alert('Validation Error', 'Title is required');
-      return;
-    }
     if (!category) {
       Alert.alert('Validation Error', 'Please select a category');
       return;
@@ -110,23 +151,20 @@ export default function ExpensesScreen() {
       Alert.alert('Validation Error', 'Please enter a valid amount');
       return;
     }
-    if (!date) {
-      Alert.alert('Validation Error', 'Date is required');
-      return;
-    }
 
     try {
       setSaving(true);
 
-      // Combine title and notes into description
+      // Auto-generate description from category if title is empty
+      const finalTitle = title.trim() || `${category.charAt(0).toUpperCase() + category.slice(1)} expense`;
       const description = notes.trim() 
-        ? `${title.trim()}\n\n${notes.trim()}`
-        : title.trim();
+        ? `${finalTitle}\n\n${notes.trim()}`
+        : finalTitle;
 
       await databaseService.createExpense({
         category,
         amount: Number(amount),
-        expense_date: date,
+        expense_date: new Date().toISOString(),
         description,
         payment_method: paymentMethod,
       });
@@ -144,12 +182,11 @@ export default function ExpensesScreen() {
   };
 
   const formatPaymentMethod = (method: PaymentMethod): string => {
+    if (!method || typeof method !== 'string') return '';
     return method.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
-  const formatCurrency = (amount: number): string => {
-    return `฿${amount.toFixed(2)}`;
-  };
+
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
@@ -240,8 +277,71 @@ export default function ExpensesScreen() {
     <View style={styles.container}>
       <StatusBar style="auto" />
 
+      {/* Category Filters */}
+      <View style={[styles.filterContainer, isTablet && styles.tabletFilterContainer]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterScroll}
+        >
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              categoryFilter === 'all' && styles.filterChipActive,
+            ]}
+            onPress={() => setCategoryFilter('all')}
+          >
+            <Text
+              style={[
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                categoryFilter === 'all' && styles.filterChipTextActive,
+              ]}
+            >
+              All
+            </Text>
+          </TouchableOpacity>
+          {categories.filter(c => c).map((cat) => (
+            <TouchableOpacity
+              key={cat}
+              style={[
+                styles.filterChip,
+                isTablet && styles.tabletFilterChip,
+                categoryFilter === cat && styles.filterChipActive,
+                categoryFilter === cat && { backgroundColor: getCategoryColor(cat), borderColor: getCategoryColor(cat) },
+              ]}
+              onPress={() => setCategoryFilter(cat)}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  isTablet && styles.tabletFilterChipText,
+                  categoryFilter === cat && styles.filterChipTextActive,
+                ]}
+              >
+                {cat}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      {/* Total Display */}
+      {filteredExpenses.length > 0 && (
+        <View style={[styles.totalContainer, isTablet && styles.tabletTotalContainer]}>
+          <Text style={[styles.totalLabel, isTablet && styles.tabletTotalLabel]}>Total:</Text>
+          <Text style={[styles.totalAmount, isTablet && styles.tabletTotalAmount]}>
+            {formatCurrency(getTotalAmount())}
+          </Text>
+          <Text style={[styles.totalCount, isTablet && styles.tabletTotalCount]}>
+            ({filteredExpenses.length} {filteredExpenses.length === 1 ? 'expense' : 'expenses'})
+          </Text>
+        </View>
+      )}
+
       <FlatList
-        data={expenses}
+        data={filteredExpenses}
         renderItem={renderExpenseItem}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={[
@@ -296,14 +396,14 @@ export default function ExpensesScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {/* Title Input */}
+              {/* Title Input (Optional) */}
               <View style={styles.formSection}>
                 <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                  Title <Text style={styles.required}>*</Text>
+                  Title <Text style={styles.optional}>(optional - auto-generated if blank)</Text>
                 </Text>
                 <TextInput
                   style={[styles.input, isTablet && styles.tabletInput]}
-                  placeholder="e.g., New equipment purchase"
+                  placeholder="Auto-filled from category"
                   placeholderTextColor="#9ca3af"
                   value={title}
                   onChangeText={setTitle}
@@ -316,7 +416,7 @@ export default function ExpensesScreen() {
                   Category <Text style={styles.required}>*</Text>
                 </Text>
                 <View style={styles.categoryGrid}>
-                  {CATEGORIES.map((cat) => (
+                  {categories.filter(c => c).map((cat) => (
                     <TouchableOpacity
                       key={cat}
                       style={[
@@ -350,7 +450,7 @@ export default function ExpensesScreen() {
                 </Text>
                 <View style={styles.amountContainer}>
                   <Text style={[styles.currencySymbol, isTablet && styles.tabletCurrencySymbol]}>
-                    ฿
+                    {getCurrencySymbol()}
                   </Text>
                   <TextInput
                     style={[styles.amountInput, isTablet && styles.tabletInput]}
@@ -369,7 +469,7 @@ export default function ExpensesScreen() {
                   Payment Method
                 </Text>
                 <View style={styles.paymentMethodGrid}>
-                  {PAYMENT_METHODS.map((method) => (
+                  {paymentMethods.filter(m => m).map((method) => (
                     <TouchableOpacity
                       key={method}
                       style={[
@@ -403,22 +503,38 @@ export default function ExpensesScreen() {
                 </View>
               </View>
 
-              {/* Notes Input */}
-              <View style={styles.formSection}>
-                <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                  Notes
-                </Text>
-                <TextInput
-                  style={[styles.input, styles.notesInput, isTablet && styles.tabletInput, isTablet && styles.tabletNotesInput]}
-                  placeholder="Additional details..."
-                  placeholderTextColor="#9ca3af"
-                  value={notes}
-                  onChangeText={setNotes}
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                />
-              </View>
+              {/* Notes Input (Collapsible) */}
+              {!showNotes ? (
+                <TouchableOpacity
+                  style={styles.addNotesButton}
+                  onPress={() => setShowNotes(true)}
+                >
+                  <Ionicons name="add-circle-outline" size={20} color="#2563eb" />
+                  <Text style={styles.addNotesText}>Add notes (optional)</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.formSection}>
+                  <View style={styles.notesHeader}>
+                    <Text style={[styles.label, isTablet && styles.tabletLabel]}>
+                      Notes
+                    </Text>
+                    <TouchableOpacity onPress={() => { setShowNotes(false); setNotes(''); }}>
+                      <Ionicons name="close-circle" size={20} color="#6b7280" />
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    style={[styles.input, styles.notesInput, isTablet && styles.tabletInput, isTablet && styles.tabletNotesInput]}
+                    placeholder="Additional details..."
+                    placeholderTextColor="#9ca3af"
+                    value={notes}
+                    onChangeText={setNotes}
+                    multiline
+                    numberOfLines={4}
+                    textAlignVertical="top"
+                    autoFocus
+                  />
+                </View>
+              )}
 
               {/* Save Button */}
               <TouchableOpacity
@@ -459,6 +575,89 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // Filters
+  filterContainer: {
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    paddingVertical: 12,
+  },
+  tabletFilterContainer: {
+    paddingVertical: 16,
+  },
+  filterScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    marginRight: 8,
+  },
+  tabletFilterChip: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  filterChipActive: {
+    backgroundColor: '#2563eb',
+    borderColor: '#2563eb',
+  },
+  filterChipText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6b7280',
+  },
+  tabletFilterChipText: {
+    fontSize: 16,
+  },
+  filterChipTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+
+  // Total Display
+  totalContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#eff6ff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#bfdbfe',
+    gap: 8,
+  },
+  tabletTotalContainer: {
+    paddingVertical: 16,
+  },
+  totalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  tabletTotalLabel: {
+    fontSize: 16,
+  },
+  totalAmount: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2563eb',
+  },
+  tabletTotalAmount: {
+    fontSize: 20,
+  },
+  totalCount: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  tabletTotalCount: {
+    fontSize: 14,
   },
 
   // List
@@ -684,6 +883,11 @@ const styles = StyleSheet.create({
   required: {
     color: '#dc2626',
   },
+  optional: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '400',
+  },
 
   // Input Fields
   input: {
@@ -709,6 +913,25 @@ const styles = StyleSheet.create({
   tabletNotesInput: {
     minHeight: 120,
     paddingTop: 16,
+  },
+  notesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  addNotesButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  addNotesText: {
+    color: '#2563eb',
+    fontSize: 14,
+    fontWeight: '500',
   },
 
   // Amount Input

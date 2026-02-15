@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   StyleSheet, 
   Text, 
@@ -13,27 +13,35 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
+import { useCurrency } from '../hooks';
 import type { MemberWithSubscription, SubscriptionStatus, Package, PaymentMethod, PaymentStatus } from '../types/database';
 
 const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'card', 'bank_transfer', 'digital_wallet'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending'];
 
-type FilterType = 'all' | 'active' | 'expired';
+type StatusFilterType = 'all' | 'active' | 'expired' | 'expires_soon' | 'pending_payment';
 
 export default function MembersScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const router = useRouter();
+  const searchInputRef = useRef<TextInput>(null);
+  const { formatCurrency, getCurrencySymbol } = useCurrency();
 
   const [members, setMembers] = useState<MemberWithSubscription[]>([]);
+  const [filteredMembers, setFilteredMembers] = useState<MemberWithSubscription[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<FilterType>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all');
+  const [packageFilter, setPackageFilter] = useState<string>('all');
+  const [availablePackages, setAvailablePackages] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   // Modal state
@@ -42,7 +50,7 @@ export default function MembersScreen() {
   // Form state
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [fullName, setFullName] = useState('');  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [instagram, setInstagram] = useState('');
   
@@ -54,6 +62,8 @@ export default function MembersScreen() {
   
   const [saving, setSaving] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
+  const [quickMode, setQuickMode] = useState(true);
+  const [showContactDetails, setShowContactDetails] = useState(false);
 
   // Load members when screen comes into focus or filter/search changes
   useFocusEffect(
@@ -63,14 +73,28 @@ export default function MembersScreen() {
       } else {
         loadMembers();
       }
-    }, [filter, searchQuery])
+    }, [searchQuery])
   );
+
+  // Apply filters whenever members or filters change
+  useEffect(() => {
+    applyFilters();
+  }, [members, statusFilter, packageFilter]);
 
   const loadMembers = async () => {
     try {
       setLoading(true);
-      const data = await databaseService.getMembersWithSubscriptions(filter === 'all' ? undefined : filter);
+      // Load all members - we'll filter client-side
+      const data = await databaseService.getMembersWithSubscriptions();
       setMembers(data);
+      
+      // Extract unique package names
+      const packages = Array.from(new Set(
+        data
+          .filter(m => m.package_name)
+          .map(m => m.package_name as string)
+      )).sort();
+      setAvailablePackages(packages);
     } catch (error) {
       console.error('Error loading members:', error);
       Alert.alert('Error', 'Failed to load members');
@@ -81,14 +105,52 @@ export default function MembersScreen() {
 
   const searchMembers = async () => {
     try {
-      const data = await databaseService.searchMembers(
-        searchQuery, 
-        filter === 'all' ? undefined : filter
-      );
+      const data = await databaseService.searchMembers(searchQuery);
       setMembers(data);
+      
+      // Extract unique package names from search results
+      const packages = Array.from(new Set(
+        data
+          .filter(m => m.package_name)
+          .map(m => m.package_name as string)
+      )).sort();
+      setAvailablePackages(packages);
     } catch (error) {
       console.error('Error searching members:', error);
     }
+  };
+
+  const applyFilters = () => {
+    let result = [...members];
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      result = result.filter(member => {
+        const daysRemaining = getDaysRemaining(member.subscription_end_date);
+        
+        switch (statusFilter) {
+          case 'active':
+            return member.subscription_status === 'active';
+          case 'expired':
+            return member.subscription_status === 'expired' || (daysRemaining !== null && daysRemaining <= 0);
+          case 'expires_soon':
+            return daysRemaining !== null && daysRemaining > 0 && daysRemaining <= 3;
+          case 'pending_payment':
+            // For now, we'll show members with pending payment status if available
+            // This would need backend support to properly detect pending payments
+            return member.subscription_status === 'active'; // Placeholder
+          default:
+            return true;
+        }
+      });
+    }
+
+    // Apply package filter
+    if (packageFilter !== 'all') {
+      result = result.filter(member => member.package_name === packageFilter);
+    }
+
+    setFilteredMembers(result);
   };
 
   const handleRefresh = async () => {
@@ -102,6 +164,10 @@ export default function MembersScreen() {
       setLoadingPackages(true);
       const data = await databaseService.getActivePackages();
       setPackages(data);
+      // Auto-select first package in quick mode
+      if (data.length > 0 && !selectedPackageId) {
+        setSelectedPackageId(data[0].id);
+      }
     } catch (error) {
       console.error('Error loading packages:', error);
     } finally {
@@ -110,15 +176,21 @@ export default function MembersScreen() {
   };
 
   const handleAddMember = () => {
+    // Dismiss keyboard if open
+    Keyboard.dismiss();
+    
     // Reset form
     setFirstName('');
     setLastName('');
+    setFullName('');
     setPhone('');
     setEmail('');
     setInstagram('');
     setSelectedPackageId(null);
     setPaymentMethod('cash');
     setPaymentStatus('completed');
+    setQuickMode(true);
+    setShowContactDetails(false);
     
     // Load packages and show modal
     loadPackages();
@@ -130,9 +202,24 @@ export default function MembersScreen() {
   };
 
   const handleSave = async () => {
+    // Parse name in quick mode
+    if (quickMode && fullName.trim()) {
+      const parts = fullName.trim().split(' ');
+      if (parts.length === 1) {
+        setFirstName(parts[0]);
+        setLastName(parts[0]);  // Use same for both if only one name provided
+      } else {
+        setFirstName(parts[0]);
+        setLastName(parts.slice(1).join(' '));
+      }
+    }
+
     // Validation
-    if (!firstName.trim() || !lastName.trim()) {
-      Alert.alert('Validation Error', 'First name and last name are required');
+    const fName = quickMode ? fullName.trim().split(' ')[0] || '' : firstName.trim();
+    const lName = quickMode ? (fullName.trim().split(' ').slice(1).join(' ') || fullName.trim().split(' ')[0] || '') : lastName.trim();
+    
+    if (!fName) {
+      Alert.alert('Validation Error', quickMode ? 'Name is required' : 'First name is required');
       return;
     }
 
@@ -141,8 +228,8 @@ export default function MembersScreen() {
 
       // 1. Create member
       const member = await databaseService.createMember({
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
+        first_name: fName,
+        last_name: lName,
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
         instagram: instagram.trim() || undefined,
@@ -211,6 +298,7 @@ export default function MembersScreen() {
   };
 
   const handleAddPayment = (member: MemberWithSubscription) => {
+    Keyboard.dismiss();
     Alert.alert(
       'Add Payment',
       `Add payment for ${member.first_name} ${member.last_name}?`,
@@ -242,148 +330,280 @@ export default function MembersScreen() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  const renderMemberItem = ({ item }: { item: MemberWithSubscription }) => (
-    <TouchableOpacity 
-      style={[styles.memberCard, isTablet && styles.tabletMemberCard]}
-      onPress={() => router.push(`/member-detail?id=${item.id}`)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.memberInfo}>
-        <View style={styles.memberHeader}>
-          <Text style={[styles.memberName, isTablet && styles.tabletMemberName]}>
-            {item.first_name} {item.last_name}
-          </Text>
-          <View style={[
-            styles.statusBadge,
-            { backgroundColor: getStatusColor(item.subscription_status) }
-          ]}>
-            <Text style={[styles.statusText, isTablet && styles.tabletStatusText]}>
-              {getStatusLabel(item.subscription_status)}
-            </Text>
+  const getDaysRemaining = (endDate: string | null): number | null => {
+    if (!endDate) return null;
+    const end = new Date(endDate);
+    const today = new Date();
+    const diffTime = end.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  const getDaysRemainingColor = (days: number | null): string => {
+    if (days === null) return '#6b7280';
+    if (days <= 0) return '#ef4444'; // Red - expired
+    if (days >= 2 && days <= 3) return '#f59e0b'; // Orange - 2-3 days
+    return '#10b981'; // Green - 1 day or 4+ days
+  };
+
+  const getDaysRemainingText = (days: number | null): string => {
+    if (days === null) return 'No subscription';
+    if (days <= 0) return 'Expired';
+    if (days === 1) return '1 day left';
+    return `${days} days left`;
+  };
+
+  const renderMemberItem = ({ item }: { item: MemberWithSubscription }) => {
+    const daysRemaining = getDaysRemaining(item.subscription_end_date);
+    const daysColor = getDaysRemainingColor(daysRemaining);
+    const isActive = item.subscription_status === 'active';
+
+    return (
+      <TouchableOpacity 
+        style={[styles.memberCard, isTablet && styles.tabletMemberCard]}
+        onPress={() => {
+          Keyboard.dismiss();
+          router.push(`/member-detail?id=${item.id}`);
+        }}
+        activeOpacity={0.7}
+      >
+        <View style={styles.memberCardContent}>
+          {/* Left side: Name, package, days */}
+          <View style={styles.memberInfo}>
+            {/* Name with active dot */}
+            <View style={styles.memberNameRow}>
+              {isActive && <View style={styles.activeDot} />}
+              <Text style={[styles.memberName, isTablet && styles.tabletMemberName]}>
+                {item.first_name} {item.last_name}
+              </Text>
+            </View>
+
+            {/* Package badge and days remaining */}
+            <View style={styles.memberMetaRow}>
+              {item.package_name && (
+                <View style={[styles.packageBadge, isTablet && styles.tabletPackageBadge]}>
+                  <Ionicons name="cube" size={isTablet ? 14 : 12} color="#6b7280" />
+                  <Text style={[styles.packageBadgeText, isTablet && styles.tabletPackageBadgeText]}>
+                    {item.package_name}
+                  </Text>
+                </View>
+              )}
+              <View style={[styles.daysRemaining, { borderColor: daysColor }]}>
+                <Text style={[styles.daysRemainingText, isTablet && styles.tabletDaysRemainingText, { color: daysColor }]}>
+                  {getDaysRemainingText(daysRemaining)}
+                </Text>
+              </View>
+            </View>
           </View>
+
+          {/* Right side: Payment button */}
+          <TouchableOpacity
+            style={[styles.paymentIconButton, isTablet && styles.tabletPaymentIconButton]}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleAddPayment(item);
+            }}
+          >
+            <Ionicons name="card" size={isTablet ? 28 : 24} color="#2563eb" />
+          </TouchableOpacity>
         </View>
-
-        <View style={styles.memberDetails}>
-          <View style={styles.detailRow}>
-            <Ionicons name="cube-outline" size={isTablet ? 18 : 16} color="#6b7280" />
-            <Text style={[styles.detailText, isTablet && styles.tabletDetailText]}>
-              {item.package_name || 'No package'}
-            </Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Ionicons name="calendar-outline" size={isTablet ? 18 : 16} color="#6b7280" />
-            <Text style={[styles.detailText, isTablet && styles.tabletDetailText]}>
-              Expires: {formatDate(item.subscription_end_date)}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.actionButtons}>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.renewButton, isTablet && styles.tabletActionButton]}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleRenew(item);
-          }}
-        >
-          <Ionicons name="refresh" size={isTablet ? 22 : 18} color="#fff" />
-          <Text style={[styles.actionButtonText, isTablet && styles.tabletActionButtonText]}>
-            Renew
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionButton, styles.paymentButton, isTablet && styles.tabletActionButton]}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleAddPayment(item);
-          }}
-        >
-          <Ionicons name="card" size={isTablet ? 22 : 18} color="#fff" />
-          <Text style={[styles.actionButtonText, isTablet && styles.tabletActionButtonText]}>
-            Payment
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <View style={styles.container}>
-      <StatusBar style="auto" />
+    <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()} accessible={false}>
+      <View style={styles.container}>
+        <StatusBar style="auto" />
       
       {/* Search Bar */}
       <View style={[styles.searchContainer, isTablet && styles.tabletSearchContainer]}>
         <Ionicons name="search" size={isTablet ? 24 : 20} color="#666" style={styles.searchIcon} />
         <TextInput
+          ref={searchInputRef}
           style={[styles.searchInput, isTablet && styles.tabletSearchInput]}
           placeholder="Search members..."
           placeholderTextColor="#999"
           value={searchQuery}
           onChangeText={setSearchQuery}
           returnKeyType="search"
+          blurOnSubmit={true}
+          onSubmitEditing={() => searchInputRef.current?.blur()}
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
+          <TouchableOpacity onPress={() => {
+            setSearchQuery('');
+            Keyboard.dismiss();
+          }}>
             <Ionicons name="close-circle" size={isTablet ? 24 : 20} color="#999" />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Filters */}
-      <View style={[styles.filterContainer, isTablet && styles.tabletFilterContainer]}>
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            isTablet && styles.tabletFilterButton,
-            filter === 'all' && styles.filterButtonActive
-          ]}
-          onPress={() => setFilter('all')}
+      {/* Status Filters */}
+      <View style={styles.filterSection}>
+        <Text style={[styles.filterSectionLabel, isTablet && styles.tabletFilterSectionLabel]}>Status</Text>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[styles.filterScrollContent, isTablet && styles.tabletFilterScrollContent]}
         >
-          <Text style={[
-            styles.filterText,
-            isTablet && styles.tabletFilterText,
-            filter === 'all' && styles.filterTextActive
-          ]}>
-            All
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'all' && styles.filterChipActive
+            ]}
+            onPress={() => {
+              setStatusFilter('all');
+              Keyboard.dismiss();
+            }}
+          >
+            <Text style={[
+              styles.filterChipText,
+              isTablet && styles.tabletFilterChipText,
+              statusFilter === 'all' && styles.filterChipTextActive
+            ]}>
+              All
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            isTablet && styles.tabletFilterButton,
-            filter === 'active' && styles.filterButtonActive
-          ]}
-          onPress={() => setFilter('active')}
-        >
-          <Text style={[
-            styles.filterText,
-            isTablet && styles.tabletFilterText,
-            filter === 'active' && styles.filterTextActive
-          ]}>
-            Active
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'active' && styles.filterChipActive
+            ]}
+            onPress={() => {
+              setStatusFilter('active');
+              Keyboard.dismiss();
+            }}
+          >
+            <Ionicons 
+              name="checkmark-circle" 
+              size={16} 
+              color={statusFilter === 'active' ? '#10b981' : '#6b7280'} 
+            />
+            <Text style={[
+              styles.filterChipText,
+              isTablet && styles.tabletFilterChipText,
+              statusFilter === 'active' && styles.filterChipTextActive
+            ]}>
+              Active
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            isTablet && styles.tabletFilterButton,
-            filter === 'expired' && styles.filterButtonActive
-          ]}
-          onPress={() => setFilter('expired')}
-        >
-          <Text style={[
-            styles.filterText,
-            isTablet && styles.tabletFilterText,
-            filter === 'expired' && styles.filterTextActive
-          ]}>
-            Expired
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'expired' && styles.filterChipActive
+            ]}
+            onPress={() => {
+              setStatusFilter('expired');
+              Keyboard.dismiss();
+            }}
+          >
+            <Ionicons 
+              name="close-circle" 
+              size={16} 
+              color={statusFilter === 'expired' ? '#ef4444' : '#6b7280'} 
+            />
+            <Text style={[
+              styles.filterChipText,
+              isTablet && styles.tabletFilterChipText,
+              statusFilter === 'expired' && styles.filterChipTextActive
+            ]}>
+              Expired
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'expires_soon' && styles.filterChipActive
+            ]}
+            onPress={() => {
+              setStatusFilter('expires_soon');
+              Keyboard.dismiss();
+            }}
+          >
+            <Ionicons 
+              name="alert-circle" 
+              size={16} 
+              color={statusFilter === 'expires_soon' ? '#f59e0b' : '#6b7280'} 
+            />
+            <Text style={[
+              styles.filterChipText,
+              isTablet && styles.tabletFilterChipText,
+              statusFilter === 'expires_soon' && styles.filterChipTextActive
+            ]}>
+              Expires Soon
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
+
+      {/* Package Filters */}
+      {availablePackages.length > 0 && (
+        <View style={styles.filterSection}>
+          <Text style={[styles.filterSectionLabel, isTablet && styles.tabletFilterSectionLabel]}>Package</Text>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={[styles.filterScrollContent, isTablet && styles.tabletFilterScrollContent]}
+          >
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                isTablet && styles.tabletFilterChip,
+                packageFilter === 'all' && styles.filterChipActive
+              ]}
+              onPress={() => {
+                setPackageFilter('all');
+                Keyboard.dismiss();
+              }}
+            >
+              <Text style={[
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                packageFilter === 'all' && styles.filterChipTextActive
+              ]}>
+                All Packages
+              </Text>
+            </TouchableOpacity>
+
+            {availablePackages.map(pkg => (
+              <TouchableOpacity
+                key={pkg}
+                style={[
+                  styles.filterChip,
+                  isTablet && styles.tabletFilterChip,
+                  packageFilter === pkg && styles.filterChipActive
+                ]}
+                onPress={() => {
+                  setPackageFilter(pkg);
+                  Keyboard.dismiss();
+                }}
+              >
+                <Ionicons 
+                  name="cube" 
+                  size={16} 
+                  color={packageFilter === pkg ? '#2563eb' : '#6b7280'} 
+                />
+                <Text style={[
+                  styles.filterChipText,
+                  isTablet && styles.tabletFilterChipText,
+                  packageFilter === pkg && styles.filterChipTextActive
+                ]}>
+                  {pkg}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Members List */}
       {loading ? (
@@ -392,7 +612,7 @@ export default function MembersScreen() {
         </View>
       ) : (
         <FlatList
-          data={members}
+          data={filteredMembers}
           renderItem={renderMemberItem}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={[
@@ -401,6 +621,8 @@ export default function MembersScreen() {
           ]}
           refreshing={refreshing}
           onRefresh={handleRefresh}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={() => Keyboard.dismiss()}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="people-outline" size={64} color="#ccc" />
@@ -451,77 +673,130 @@ export default function MembersScreen() {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
+              {/* Quick Mode Toggle */}
+              <View style={styles.modeToggle}>
+                <TouchableOpacity
+                  style={[styles.modeButton, quickMode && styles.modeButtonActive]}
+                  onPress={() => setQuickMode(true)}
+                >
+                  <Ionicons name="flash" size={18} color={quickMode ? '#2563eb' : '#6b7280'} />
+                  <Text style={[styles.modeButtonText, quickMode && styles.modeButtonTextActive]}>
+                    Quick Add
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeButton, !quickMode && styles.modeButtonActive]}
+                  onPress={() => setQuickMode(false)}
+                >
+                  <Ionicons name="list" size={18} color={!quickMode ? '#2563eb' : '#6b7280'} />
+                  <Text style={[styles.modeButtonText, !quickMode && styles.modeButtonTextActive]}>
+                    Full Details
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
               {/* Member Information Section */}
               <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle]}>
                 Member Information
               </Text>
 
-              {/* Name Row */}
-              <View style={styles.row}>
-                <View style={[styles.formSection, { flex: 1, marginRight: 8 }]}>
+              {quickMode ? (
+                /* Quick Mode: Single Name Field */
+                <View style={styles.formSection}>
                   <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                    First Name <Text style={styles.required}>*</Text>
+                    Name <Text style={styles.required}>*</Text>
                   </Text>
                   <TextInput
                     style={[styles.input, isTablet && styles.tabletInput]}
-                    placeholder="First name"
+                    placeholder="Full name"
                     placeholderTextColor="#9ca3af"
-                    value={firstName}
-                    onChangeText={setFirstName}
+                    value={fullName}
+                    onChangeText={setFullName}
+                    autoFocus
                   />
                 </View>
+              ) : (
+                /* Full Mode: Separate Name Fields */
+                <>
+                  <View style={styles.row}>
+                    <View style={[styles.formSection, { flex: 1, marginRight: 8 }]}>
+                      <Text style={[styles.label, isTablet && styles.tabletLabel]}>
+                        First Name <Text style={styles.required}>*</Text>
+                      </Text>
+                      <TextInput
+                        style={[styles.input, isTablet && styles.tabletInput]}
+                        placeholder="First name"
+                        placeholderTextColor="#9ca3af"
+                        value={firstName}
+                        onChangeText={setFirstName}
+                      />
+                    </View>
 
-                <View style={[styles.formSection, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                    Last Name <Text style={styles.required}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={[styles.input, isTablet && styles.tabletInput]}
-                    placeholder="Last name"
-                    placeholderTextColor="#9ca3af"
-                    value={lastName}
-                    onChangeText={setLastName}
-                  />
-                </View>
-              </View>
+                    <View style={[styles.formSection, { flex: 1, marginLeft: 8 }]}>
+                      <Text style={[styles.label, isTablet && styles.tabletLabel]}>
+                        Last Name <Text style={styles.required}>*</Text>
+                      </Text>
+                      <TextInput
+                        style={[styles.input, isTablet && styles.tabletInput]}
+                        placeholder="Last name"
+                        placeholderTextColor="#9ca3af"
+                        value={lastName}
+                        onChangeText={setLastName}
+                      />
+                    </View>
+                  </View>
+                </>
+              )}
 
-              {/* Contact Fields */}
-              <View style={styles.formSection}>
-                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Phone</Text>
-                <TextInput
-                  style={[styles.input, isTablet && styles.tabletInput]}
-                  placeholder="Phone number"
-                  placeholderTextColor="#9ca3af"
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                />
-              </View>
+              {/* Contact Fields - Collapsible in Quick Mode */}
+              {quickMode && !showContactDetails ? (
+                <TouchableOpacity
+                  style={styles.addContactButton}
+                  onPress={() => setShowContactDetails(true)}
+                >
+                  <Ionicons name="add-circle-outline" size={20} color="#2563eb" />
+                  <Text style={styles.addContactText}>Add contact details (optional)</Text>
+                </TouchableOpacity>
+              ) : !quickMode || showContactDetails ? (
+                <>
+                  <View style={styles.formSection}>
+                    <Text style={[styles.label, isTablet && styles.tabletLabel]}>Phone</Text>
+                    <TextInput
+                      style={[styles.input, isTablet && styles.tabletInput]}
+                      placeholder="Phone number"
+                      placeholderTextColor="#9ca3af"
+                      value={phone}
+                      onChangeText={setPhone}
+                      keyboardType="phone-pad"
+                    />
+                  </View>
 
-              <View style={styles.formSection}>
-                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Email</Text>
-                <TextInput
-                  style={[styles.input, isTablet && styles.tabletInput]}
-                  placeholder="Email address"
-                  placeholderTextColor="#9ca3af"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-              </View>
+                  <View style={styles.formSection}>
+                    <Text style={[styles.label, isTablet && styles.tabletLabel]}>Email</Text>
+                    <TextInput
+                      style={[styles.input, isTablet && styles.tabletInput]}
+                      placeholder="Email address"
+                      placeholderTextColor="#9ca3af"
+                      value={email}
+                      onChangeText={setEmail}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
 
-              <View style={styles.formSection}>
-                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Instagram</Text>
-                <TextInput
-                  style={[styles.input, isTablet && styles.tabletInput]}
-                  placeholder="@username"
-                  placeholderTextColor="#9ca3af"
-                  value={instagram}
-                  onChangeText={setInstagram}
-                  autoCapitalize="none"
-                />
-              </View>
+                  <View style={styles.formSection}>
+                    <Text style={[styles.label, isTablet && styles.tabletLabel]}>Instagram</Text>
+                    <TextInput
+                      style={[styles.input, isTablet && styles.tabletInput]}
+                      placeholder="@username"
+                      placeholderTextColor="#9ca3af"
+                      value={instagram}
+                      onChangeText={setInstagram}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </>
+              ) : null}
 
               {/* Package Selection Section */}
               <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
@@ -549,7 +824,7 @@ export default function MembersScreen() {
                           {pkg.name}
                         </Text>
                         <Text style={[styles.packagePrice, isTablet && styles.tabletPackagePrice]}>
-                          ฿{pkg.price.toLocaleString()}
+                          {getCurrencySymbol()}{pkg.price.toLocaleString()}
                         </Text>
                       </View>
                       <Text style={[styles.packageDetails, isTablet && styles.tabletPackageDetails]}>
@@ -664,7 +939,8 @@ export default function MembersScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </View>
+      </View>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -711,43 +987,66 @@ const styles = StyleSheet.create({
   },
   
   // Filters
-  filterContainer: {
-    flexDirection: 'row',
-    gap: 12,
+  // Filters
+  filterSection: {
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  tabletFilterContainer: {
-    paddingHorizontal: 24,
-    marginBottom: 20,
-    gap: 16,
+  filterSectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  filterButton: {
-    paddingHorizontal: 20,
+  tabletFilterSectionLabel: {
+    fontSize: 14,
+    marginBottom: 10,
+  },
+  filterScrollContent: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  tabletFilterScrollContent: {
+    gap: 12,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  tabletFilterButton: {
-    paddingHorizontal: 28,
-    paddingVertical: 12,
+  tabletFilterChip: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    gap: 8,
   },
-  filterButtonActive: {
-    backgroundColor: '#2563eb',
+  filterChipActive: {
+    backgroundColor: '#eff6ff',
     borderColor: '#2563eb',
   },
-  filterText: {
+  filterChipText: {
     fontSize: 14,
     color: '#6b7280',
     fontWeight: '500',
   },
-  tabletFilterText: {
+  tabletFilterChipText: {
     fontSize: 16,
   },
-  filterTextActive: {
-    color: '#fff',
+  filterChipTextActive: {
+    color: '#2563eb',
+    fontWeight: '600',
   },
   
   // List
@@ -777,84 +1076,87 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
   },
-  memberInfo: {
-    marginBottom: 12,
-  },
-  memberHeader: {
+  memberCardContent: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'space-between',
+  },
+  memberInfo: {
+    flex: 1,
+    gap: 12,
+  },
+  memberNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  activeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
   },
   memberName: {
     fontSize: 18,
     fontWeight: '600',
     color: '#1f2937',
-    flex: 1,
   },
   tabletMemberName: {
     fontSize: 22,
   },
-  statusBadge: {
-    paddingHorizontal: 12,
+  memberMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  packageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
     paddingVertical: 4,
+    backgroundColor: '#f3f4f6',
     borderRadius: 12,
   },
-  statusText: {
+  tabletPackageBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  packageBadgeText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  tabletStatusText: {
-    fontSize: 14,
-  },
-  memberDetails: {
-    gap: 8,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  detailText: {
-    fontSize: 14,
+    fontWeight: '500',
     color: '#6b7280',
   },
-  tabletDetailText: {
-    fontSize: 16,
-  },
-  
-  // Action Buttons
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  tabletActionButton: {
-    paddingVertical: 14,
-    gap: 8,
-  },
-  renewButton: {
-    backgroundColor: '#2563eb',
-  },
-  paymentButton: {
-    backgroundColor: '#10b981',
-  },
-  actionButtonText: {
+  tabletPackageBadgeText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
   },
-  tabletActionButtonText: {
-    fontSize: 16,
+  daysRemaining: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  daysRemainingText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  tabletDaysRemainingText: {
+    fontSize: 15,
+  },
+  paymentIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#eff6ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  tabletPaymentIconButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
   },
   
   // Loading & Empty States
@@ -957,6 +1259,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
   },
+  
+  // Mode Toggle
+  modeToggle: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+    padding: 4,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+  },
+  modeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  modeButtonActive: {
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  modeButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6b7280',
+  },
+  modeButtonTextActive: {
+    color: '#2563eb',
+    fontWeight: '600',
+  },
+  
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
@@ -969,6 +1310,19 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     marginHorizontal: -8,
+  },
+  addContactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  addContactText: {
+    color: '#2563eb',
+    fontSize: 14,
+    fontWeight: '500',
   },
   formSection: {
     marginBottom: 20,

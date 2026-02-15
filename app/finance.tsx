@@ -7,17 +7,20 @@ import {
   useWindowDimensions,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
+import { useCurrency } from '../hooks';
 
 const FINANCE_PIN = '1234'; // In production, this should be stored securely
 
 export default function FinanceScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { formatCurrency } = useCurrency();
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
@@ -78,9 +81,7 @@ export default function FinanceScreen() {
     setPin('');
   };
 
-  const formatCurrency = (amount: number): string => {
-    return `฿${amount.toFixed(2)}`;
-  };
+
 
   // PIN Entry Screen
   if (!isAuthenticated) {
@@ -181,7 +182,11 @@ export default function FinanceScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.content, isTablet && styles.tabletContent]}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={[styles.content, isTablet && styles.tabletContent]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Today Revenue */}
         <View style={[styles.statCard, styles.todayCard, isTablet && styles.tabletStatCard]}>
           <View style={styles.statHeader}>
@@ -252,7 +257,7 @@ export default function FinanceScreen() {
             Financial data is calculated from completed payments and recorded expenses for the current month.
           </Text>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -261,6 +266,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  scrollView: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -380,8 +388,8 @@ const styles = StyleSheet.create({
 
   // Content
   content: {
-    flex: 1,
     padding: 16,
+    paddingBottom: 32,
   },
   tabletContent: {
     padding: 24,

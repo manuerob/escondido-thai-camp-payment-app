@@ -110,6 +110,13 @@ export default function DrawerLayout() {
           }}
         />
         <Drawer.Screen
+          name="add-expense"
+          options={{
+            drawerItemStyle: { display: 'none' },
+            title: 'Add Expense',
+          }}
+        />
+        <Drawer.Screen
           name="(modals)"
           options={{
             drawerItemStyle: { display: 'none' },

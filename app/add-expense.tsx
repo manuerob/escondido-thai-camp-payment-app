@@ -14,9 +14,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { databaseService } from '../../services/database.service';
-import { useCurrency } from '../../hooks';
-import type { PaymentMethod } from '../../types/database';
+import { databaseService } from '../services/database.service';
+import { useCurrency } from '../hooks';
+import type { PaymentMethod } from '../types/database';
 
 export default function AddExpenseScreen() {
   const { width } = useWindowDimensions();

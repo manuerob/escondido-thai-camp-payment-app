@@ -10,19 +10,21 @@ import {
   useWindowDimensions,
   Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { databaseService } from '../../services/database.service';
+import { useCurrency } from '../../hooks';
 import type { Package, PaymentMethod, PaymentStatus } from '../../types/database';
 
-const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'card', 'bank_transfer', 'digital_wallet'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending'];
 
 export default function AddMemberScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const router = useRouter();
+  const { getCurrencySymbol } = useCurrency();
 
   // Form state
   const [firstName, setFirstName] = useState('');
@@ -36,12 +38,14 @@ export default function AddMemberScreen() {
   const [selectedPackageId, setSelectedPackageId] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('completed');
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(['cash', 'card', 'bank_transfer', 'digital_wallet']);
 
   const [loading, setLoading] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(true);
 
   useEffect(() => {
     loadPackages();
+    loadPaymentMethods();
   }, []);
 
   const loadPackages = async () => {
@@ -52,6 +56,31 @@ export default function AddMemberScreen() {
       console.error('Error loading packages:', error);
     } finally {
       setLoadingPackages(false);
+    }
+  };
+
+  const loadPaymentMethods = async () => {
+    try {
+      const savedPaymentMethods = await AsyncStorage.getItem('payment_methods');
+      if (savedPaymentMethods) {
+        const methods = JSON.parse(savedPaymentMethods);
+        // Handle migration from objects to strings
+        const validMethods = methods
+          .map((m: any) => {
+            if (typeof m === 'string') return m;
+            if (typeof m === 'object' && m.id) return m.id;
+            return null;
+          })
+          .filter((m: any) => m && typeof m === 'string' && m.trim().length > 0);
+        if (validMethods.length > 0) {
+          setPaymentMethods(validMethods as PaymentMethod[]);
+          if (!validMethods.includes(paymentMethod)) {
+            setPaymentMethod(validMethods[0]);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading payment methods:', error);
     }
   };
 
@@ -233,7 +262,7 @@ export default function AddMemberScreen() {
                       {pkg.name}
                     </Text>
                     <Text style={[styles.packagePrice, isTablet && styles.tabletPackagePrice]}>
-                      ฿{pkg.price}
+                      {getCurrencySymbol()}{pkg.price}
                     </Text>
                     <Text style={[styles.packageDuration, isTablet && styles.tabletPackageDuration]}>
                       {pkg.duration_days} days
@@ -248,7 +277,7 @@ export default function AddMemberScreen() {
                   <View style={styles.inputContainer}>
                     <Text style={[styles.label, isTablet && styles.tabletLabel]}>Payment Method</Text>
                     <View style={styles.optionsRow}>
-                      {PAYMENT_METHODS.map((method) => (
+                      {paymentMethods.filter(m => m).map((method) => (
                         <TouchableOpacity
                           key={method}
                           style={[
@@ -313,7 +342,7 @@ export default function AddMemberScreen() {
                           Amount:
                         </Text>
                         <Text style={[styles.summaryValue, isTablet && styles.tabletSummaryValue]}>
-                          ฿{selectedPackage.price}
+                          {getCurrencySymbol()}{selectedPackage.price}
                         </Text>
                       </View>
                       <View style={styles.summaryRow}>

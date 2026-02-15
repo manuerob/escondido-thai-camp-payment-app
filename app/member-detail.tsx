@@ -14,14 +14,14 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
+import { useCurrency } from '../hooks';
 import type { Member, Subscription, Payment, SubscriptionStatus } from '../types/database';
 
 export default function MemberDetailScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const router = useRouter();
-  const params = useLocalSearchParams();
-  const memberId = Number(params.id);
+  const params = useLocalSearchParams();  const { formatCurrency } = useCurrency();  const memberId = Number(params.id);
 
   const [member, setMember] = useState<Member | null>(null);
   const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(null);
@@ -111,9 +111,7 @@ export default function MemberDetailScreen() {
     });
   };
 
-  const formatCurrency = (amount: number): string => {
-    return `฿${amount.toFixed(2)}`;
-  };
+
 
   if (loading) {
     return (

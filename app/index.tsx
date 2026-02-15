@@ -19,7 +19,6 @@ export default function HomeScreen() {
   const router = useRouter();
   
   const isTablet = width >= 768;
-  const [searchQuery, setSearchQuery] = useState('');
   const [stats, setStats] = useState({
     activeMembersCount: 0,
     expiringSoonCount: 0,
@@ -46,21 +45,20 @@ export default function HomeScreen() {
     }
   };
 
-  const handleSearch = () => {
-    if (searchQuery.trim()) {
-      router.push('/members');
-      // TODO: Pass search query to members screen
-    }
-  };
-
   const handleQuickRenew = () => {
     router.push('/members');
-    // TODO: Navigate to renew flow
   };
 
   const handleQuickPayment = () => {
-    router.push('/payments');
-    // TODO: Navigate to payment entry
+    router.push('/expenses');
+  };
+
+  const handleAddMember = () => {
+    router.push('/members');
+  };
+
+  const handleAddExpense = () => {
+    router.push('/expenses');
   };
 
   return (
@@ -81,31 +79,6 @@ export default function HomeScreen() {
           ]}>
             Escondido Thai Camp
           </Text>
-
-          {/* Search Bar */}
-          <View style={[
-            styles.searchContainer,
-            isTablet && styles.tabletSearchContainer
-          ]}>
-            <Ionicons name="search" size={isTablet ? 24 : 20} color="#666" style={styles.searchIcon} />
-            <TextInput
-              style={[
-                styles.searchInput,
-                isTablet && styles.tabletSearchInput
-              ]}
-              placeholder="Search members..."
-              placeholderTextColor="#999"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={handleSearch}
-              returnKeyType="search"
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={isTablet ? 24 : 20} color="#999" />
-              </TouchableOpacity>
-            )}
-          </View>
 
           {/* Stats Cards */}
           {loading ? (
@@ -198,14 +171,14 @@ export default function HomeScreen() {
                 styles.primaryButton,
                 isTablet && styles.tabletActionButton
               ]}
-              onPress={handleQuickRenew}
+              onPress={handleAddMember}
             >
-              <Ionicons name="refresh" size={isTablet ? 28 : 24} color="#fff" />
+              <Ionicons name="person-add" size={isTablet ? 28 : 24} color="#fff" />
               <Text style={[
                 styles.buttonText,
                 isTablet && styles.tabletButtonText
               ]}>
-                Quick Renew
+                Add Member
               </Text>
             </TouchableOpacity>
 
@@ -215,15 +188,43 @@ export default function HomeScreen() {
                 styles.secondaryButton,
                 isTablet && styles.tabletActionButton
               ]}
-              onPress={handleQuickPayment}
+              onPress={handleAddExpense}
             >
-              <Ionicons name="card" size={isTablet ? 28 : 24} color="#fff" />
+              <Ionicons name="receipt" size={isTablet ? 28 : 24} color="#fff" />
               <Text style={[
                 styles.buttonText,
                 isTablet && styles.tabletButtonText
               ]}>
-                Quick Add Payment
+                Add Expense
               </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Quick Links */}
+          <View style={[
+            styles.quickLinksContainer,
+            isTablet && styles.tabletQuickLinksContainer
+          ]}>
+            <TouchableOpacity
+              style={[styles.quickLink, isTablet && styles.tabletQuickLink]}
+              onPress={handleQuickRenew}
+            >
+              <Ionicons name="people-outline" size={isTablet ? 24 : 20} color="#2563eb" />
+              <Text style={[styles.quickLinkText, isTablet && styles.tabletQuickLinkText]}>
+                View All Members
+              </Text>
+              <Ionicons name="chevron-forward" size={isTablet ? 20 : 16} color="#9ca3af" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.quickLink, isTablet && styles.tabletQuickLink]}
+              onPress={handleQuickPayment}
+            >
+              <Ionicons name="receipt-outline" size={isTablet ? 24 : 20} color="#2563eb" />
+              <Text style={[styles.quickLinkText, isTablet && styles.tabletQuickLinkText]}>
+                View All Expenses
+              </Text>
+              <Ionicons name="chevron-forward" size={isTablet ? 20 : 16} color="#9ca3af" />
             </TouchableOpacity>
           </View>
         </View>
@@ -417,5 +418,42 @@ const styles = StyleSheet.create({
   },
   tabletButtonText: {
     fontSize: 20,
+  },
+
+  // Quick Links
+  quickLinksContainer: {
+    marginTop: 24,
+    gap: 12,
+  },
+  tabletQuickLinksContainer: {
+    marginTop: 32,
+  },
+  quickLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+    gap: 12,
+  },
+  tabletQuickLink: {
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+  },
+  quickLinkText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1f2937',
+  },
+  tabletQuickLinkText: {
+    fontSize: 18,
   },
 });

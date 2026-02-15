@@ -8,55 +8,47 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
+import { useCurrency } from '../hooks';
 import type { PaymentWithDetails, PaymentStatus, PaymentMethod } from '../types/database';
 
 type DateFilter = 'all' | 'today' | 'this_month';
-type StatusFilter = 'all' | 'completed' | 'pending';
+type StatusFilter = 'all' | 'completed' | 'pending' | 'failed' | 'refunded';
 
 export default function PaymentsScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
+  const { formatCurrency } = useCurrency();
 
   const [payments, setPayments] = useState<PaymentWithDetails[]>([]);
+  const [filteredPayments, setFilteredPayments] = useState<PaymentWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [total, setTotal] = useState(0);
 
-  // Load payments when screen comes into focus or filters change
+  // Load payments when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       loadPayments();
-    }, [dateFilter, statusFilter])
+    }, [])
   );
+
+  // Apply filters whenever payments or filters change
+  useEffect(() => {
+    applyFilters();
+  }, [payments, dateFilter, statusFilter]);
 
   const loadPayments = async () => {
     try {
       setLoading(true);
-      const filter: any = {};
-      
-      if (dateFilter === 'today') {
-        filter.dateFilter = 'today';
-      } else if (dateFilter === 'this_month') {
-        filter.dateFilter = 'this_month';
-      }
-      
-      if (statusFilter !== 'all') {
-        filter.statusFilter = statusFilter;
-      }
-
-      const data = await databaseService.getPaymentsWithDetails(filter);
+      const data = await databaseService.getPaymentsWithDetails();
       setPayments(data);
-      
-      // Calculate total
-      const totalAmount = data.reduce((sum, payment) => sum + payment.amount, 0);
-      setTotal(totalAmount);
     } catch (error) {
       console.error('Error loading payments:', error);
     } finally {
@@ -64,14 +56,46 @@ export default function PaymentsScreen() {
     }
   };
 
+  const applyFilters = () => {
+    let result = [...payments];
+
+    // Apply date filter
+    if (dateFilter !== 'all') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      result = result.filter(payment => {
+        const paymentDate = new Date(payment.payment_date);
+        paymentDate.setHours(0, 0, 0, 0);
+
+        if (dateFilter === 'today') {
+          return paymentDate.getTime() === today.getTime();
+        } else if (dateFilter === 'this_month') {
+          return (
+            paymentDate.getMonth() === today.getMonth() &&
+            paymentDate.getFullYear() === today.getFullYear()
+          );
+        }
+        return true;
+      });
+    }
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      result = result.filter(payment => payment.status === statusFilter);
+    }
+
+    setFilteredPayments(result);
+  };
+
+  const getTotalAmount = (): number => {
+    return filteredPayments.reduce((sum, payment) => sum + payment.amount, 0);
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadPayments();
     setRefreshing(false);
-  };
-
-  const formatCurrency = (amount: number): string => {
-    return `฿${amount.toFixed(2)}`;
   };
 
   const formatDate = (dateString: string): string => {
@@ -95,18 +119,13 @@ export default function PaymentsScreen() {
   };
 
   const getStatusColor = (status: PaymentStatus): string => {
-    switch (status) {
-      case 'completed':
-        return '#10b981';
-      case 'pending':
-        return '#f59e0b';
-      case 'failed':
-        return '#ef4444';
-      case 'refunded':
-        return '#6b7280';
-      default:
-        return '#6b7280';
-    }
+    const colors: Record<PaymentStatus, string> = {
+      'completed': '#10b981',
+      'pending': '#f59e0b',
+      'failed': '#ef4444',
+      'refunded': '#6b7280',
+    };
+    return colors[status] || '#6b7280';
   };
 
   const formatPaymentMethod = (method: PaymentMethod): string => {
@@ -116,55 +135,46 @@ export default function PaymentsScreen() {
   const renderPaymentItem = ({ item }: { item: PaymentWithDetails }) => (
     <View style={[styles.paymentCard, isTablet && styles.tabletPaymentCard]}>
       <View style={styles.paymentHeader}>
-        <View style={styles.memberInfo}>
-          <Ionicons name="person" size={isTablet ? 20 : 18} color="#6b7280" />
+        <View style={styles.titleContainer}>
           <Text style={[styles.memberName, isTablet && styles.tabletMemberName]}>
             {item.member_name}
           </Text>
+          {item.package_name && (
+            <Text style={[styles.packageName, isTablet && styles.tabletPackageName]}>
+              {item.package_name}
+            </Text>
+          )}
         </View>
-        <View style={[
-          styles.statusBadge,
-          { backgroundColor: getStatusColor(item.status) },
-        ]}>
+        <View
+          style={[
+            styles.statusBadge,
+            { backgroundColor: getStatusColor(item.status) },
+          ]}
+        >
           <Text style={[styles.statusText, isTablet && styles.tabletStatusText]}>
             {item.status}
           </Text>
         </View>
       </View>
 
-      <View style={styles.paymentBody}>
-        <View style={styles.paymentRow}>
-          <View style={styles.paymentDetail}>
-            <Ionicons name="cash-outline" size={isTablet ? 20 : 18} color="#2563eb" />
-            <Text style={[styles.amountLabel, isTablet && styles.tabletAmountLabel]}>
-              Amount
-            </Text>
-          </View>
-          <Text style={[styles.amountValue, isTablet && styles.tabletAmountValue]}>
+      <View style={styles.paymentDetails}>
+        <View style={styles.detailRow}>
+          <Ionicons name="cash-outline" size={isTablet ? 20 : 18} color="#1f2937" />
+          <Text style={[styles.amount, isTablet && styles.tabletAmount]}>
             {formatCurrency(item.amount)}
           </Text>
         </View>
 
-        <View style={styles.paymentRow}>
-          <View style={styles.paymentDetail}>
-            <Ionicons name="card-outline" size={isTablet ? 20 : 18} color="#6b7280" />
-            <Text style={[styles.detailLabel, isTablet && styles.tabletDetailLabel]}>
-              Method
-            </Text>
-          </View>
-          <Text style={[styles.detailValue, isTablet && styles.tabletDetailValue]}>
+        <View style={styles.detailRow}>
+          <Ionicons name="card-outline" size={isTablet ? 20 : 18} color="#6b7280" />
+          <Text style={[styles.detailText, isTablet && styles.tabletDetailText]}>
             {formatPaymentMethod(item.payment_method)}
           </Text>
         </View>
 
-        <View style={styles.paymentRow}>
-          <View style={styles.paymentDetail}>
-            <Ionicons name="calendar-outline" size={isTablet ? 20 : 18} color="#6b7280" />
-            <Text style={[styles.detailLabel, isTablet && styles.tabletDetailLabel]}>
-              Date
-            </Text>
-          </View>
-          <Text style={[styles.detailValue, isTablet && styles.tabletDetailValue]}>
+        <View style={styles.detailRow}>
+          <Ionicons name="calendar-outline" size={isTablet ? 20 : 18} color="#6b7280" />
+          <Text style={[styles.detailText, isTablet && styles.tabletDetailText]}>
             {formatDate(item.payment_date)}
           </Text>
         </View>
@@ -196,37 +206,26 @@ export default function PaymentsScreen() {
     <View style={styles.container}>
       <StatusBar style="auto" />
 
-      {/* Total Section */}
-      <View style={[styles.totalSection, isTablet && styles.tabletTotalSection]}>
-        <View style={styles.totalContent}>
-          <Text style={[styles.totalLabel, isTablet && styles.tabletTotalLabel]}>
-            Total{dateFilter === 'today' ? ' Today' : dateFilter === 'this_month' ? ' This Month' : ''}
-          </Text>
-          <Text style={[styles.totalAmount, isTablet && styles.tabletTotalAmount]}>
-            {formatCurrency(total)}
-          </Text>
-          <Text style={[styles.totalCount, isTablet && styles.tabletTotalCount]}>
-            {payments.length} {payments.length === 1 ? 'payment' : 'payments'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Date Filters */}
-      <View style={[styles.filterSection, isTablet && styles.tabletFilterSection]}>
-        <View style={styles.filterRow}>
+      {/* Date Filter Chips */}
+      <View style={[styles.filterContainer, isTablet && styles.tabletFilterContainer]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterScroll}
+        >
           <TouchableOpacity
             style={[
-              styles.filterButton,
-              isTablet && styles.tabletFilterButton,
-              dateFilter === 'all' && styles.filterButtonActive,
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              dateFilter === 'all' && styles.filterChipActive,
             ]}
             onPress={() => setDateFilter('all')}
           >
             <Text
               style={[
-                styles.filterText,
-                isTablet && styles.tabletFilterText,
-                dateFilter === 'all' && styles.filterTextActive,
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                dateFilter === 'all' && styles.filterChipTextActive,
               ]}
             >
               All Time
@@ -235,17 +234,22 @@ export default function PaymentsScreen() {
 
           <TouchableOpacity
             style={[
-              styles.filterButton,
-              isTablet && styles.tabletFilterButton,
-              dateFilter === 'today' && styles.filterButtonActive,
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              dateFilter === 'today' && styles.filterChipActive,
             ]}
             onPress={() => setDateFilter('today')}
           >
+            <Ionicons
+              name="today"
+              size={16}
+              color={dateFilter === 'today' ? '#2563eb' : '#6b7280'}
+            />
             <Text
               style={[
-                styles.filterText,
-                isTablet && styles.tabletFilterText,
-                dateFilter === 'today' && styles.filterTextActive,
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                dateFilter === 'today' && styles.filterChipTextActive,
               ]}
             >
               Today
@@ -254,39 +258,50 @@ export default function PaymentsScreen() {
 
           <TouchableOpacity
             style={[
-              styles.filterButton,
-              isTablet && styles.tabletFilterButton,
-              dateFilter === 'this_month' && styles.filterButtonActive,
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              dateFilter === 'this_month' && styles.filterChipActive,
             ]}
             onPress={() => setDateFilter('this_month')}
           >
+            <Ionicons
+              name="calendar"
+              size={16}
+              color={dateFilter === 'this_month' ? '#2563eb' : '#6b7280'}
+            />
             <Text
               style={[
-                styles.filterText,
-                isTablet && styles.tabletFilterText,
-                dateFilter === 'this_month' && styles.filterTextActive,
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                dateFilter === 'this_month' && styles.filterChipTextActive,
               ]}
             >
               This Month
             </Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
+      </View>
 
-        {/* Status Filters */}
-        <View style={styles.filterRow}>
+      {/* Status Filter Chips */}
+      <View style={[styles.filterContainer, isTablet && styles.tabletFilterContainer]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterScroll}
+        >
           <TouchableOpacity
             style={[
-              styles.filterButton,
-              isTablet && styles.tabletFilterButton,
-              statusFilter === 'all' && styles.filterButtonActive,
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'all' && styles.filterChipActive,
             ]}
             onPress={() => setStatusFilter('all')}
           >
             <Text
               style={[
-                styles.filterText,
-                isTablet && styles.tabletFilterText,
-                statusFilter === 'all' && styles.filterTextActive,
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                statusFilter === 'all' && styles.filterChipTextActive,
               ]}
             >
               All Status
@@ -295,47 +310,81 @@ export default function PaymentsScreen() {
 
           <TouchableOpacity
             style={[
-              styles.filterButton,
-              isTablet && styles.tabletFilterButton,
-              statusFilter === 'completed' && styles.filterButtonActive,
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'completed' && styles.filterChipActive,
+              statusFilter === 'completed' && { backgroundColor: getStatusColor('completed'), borderColor: getStatusColor('completed') },
             ]}
             onPress={() => setStatusFilter('completed')}
           >
             <Text
               style={[
-                styles.filterText,
-                isTablet && styles.tabletFilterText,
-                statusFilter === 'completed' && styles.filterTextActive,
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                statusFilter === 'completed' && styles.filterChipTextActive,
               ]}
             >
-              Paid
+              Completed
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[
-              styles.filterButton,
-              isTablet && styles.tabletFilterButton,
-              statusFilter === 'pending' && styles.filterButtonActive,
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'pending' && styles.filterChipActive,
+              statusFilter === 'pending' && { backgroundColor: getStatusColor('pending'), borderColor: getStatusColor('pending') },
             ]}
             onPress={() => setStatusFilter('pending')}
           >
             <Text
               style={[
-                styles.filterText,
-                isTablet && styles.tabletFilterText,
-                statusFilter === 'pending' && styles.filterTextActive,
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                statusFilter === 'pending' && styles.filterChipTextActive,
               ]}
             >
               Pending
             </Text>
           </TouchableOpacity>
-        </View>
+
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              isTablet && styles.tabletFilterChip,
+              statusFilter === 'failed' && styles.filterChipActive,
+              statusFilter === 'failed' && { backgroundColor: getStatusColor('failed'), borderColor: getStatusColor('failed') },
+            ]}
+            onPress={() => setStatusFilter('failed')}
+          >
+            <Text
+              style={[
+                styles.filterChipText,
+                isTablet && styles.tabletFilterChipText,
+                statusFilter === 'failed' && styles.filterChipTextActive,
+              ]}
+            >
+              Failed
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
-      {/* Payments List */}
+      {/* Total Display */}
+      {filteredPayments.length > 0 && (
+        <View style={[styles.totalContainer, isTablet && styles.tabletTotalContainer]}>
+          <Text style={[styles.totalLabel, isTablet && styles.tabletTotalLabel]}>Total:</Text>
+          <Text style={[styles.totalAmount, isTablet && styles.tabletTotalAmount]}>
+            {formatCurrency(getTotalAmount())}
+          </Text>
+          <Text style={[styles.totalCount, isTablet && styles.tabletTotalCount]}>
+            ({filteredPayments.length} {filteredPayments.length === 1 ? 'payment' : 'payments'})
+          </Text>
+        </View>
+      )}
+
       <FlatList
-        data={payments}
+        data={filteredPayments}
         renderItem={renderPaymentItem}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={[
@@ -362,104 +411,106 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // Total Section
-  totalSection: {
-    backgroundColor: '#2563eb',
-    padding: 20,
-    paddingBottom: 24,
+  // Filter Container
+  filterContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
   },
-  tabletTotalSection: {
-    padding: 28,
-    paddingBottom: 32,
+  tabletFilterContainer: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
   },
-  totalContent: {
+  filterScroll: {
+    gap: 8,
+  },
+  filterChip: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  tabletFilterChip: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 24,
+    gap: 8,
+  },
+  filterChipActive: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#2563eb',
+  },
+  filterChipText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6b7280',
+  },
+  tabletFilterChipText: {
+    fontSize: 16,
+  },
+  filterChipTextActive: {
+    color: '#2563eb',
+    fontWeight: '600',
+  },
+
+  // Total Container
+  totalContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    gap: 8,
+  },
+  tabletTotalContainer: {
+    paddingVertical: 16,
+    paddingHorizontal: 24,
   },
   totalLabel: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#bfdbfe',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontWeight: '600',
+    color: '#6b7280',
   },
   tabletTotalLabel: {
     fontSize: 16,
   },
   totalAmount: {
-    fontSize: 40,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
-    marginTop: 8,
-    marginBottom: 4,
+    color: '#1f2937',
   },
   tabletTotalAmount: {
-    fontSize: 48,
+    fontSize: 22,
   },
   totalCount: {
-    fontSize: 14,
-    color: '#bfdbfe',
+    fontSize: 13,
+    color: '#9ca3af',
   },
   tabletTotalCount: {
-    fontSize: 16,
-  },
-
-  // Filter Section
-  filterSection: {
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    gap: 8,
-  },
-  tabletFilterSection: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  filterButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#f3f4f6',
-    alignItems: 'center',
-  },
-  tabletFilterButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-  },
-  filterButtonActive: {
-    backgroundColor: '#2563eb',
-  },
-  filterText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#6b7280',
-  },
-  tabletFilterText: {
     fontSize: 15,
   },
-  filterTextActive: {
-    color: '#fff',
-  },
 
-  // Payment List
+  // List
   listContent: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 32,
   },
   tabletListContent: {
     padding: 24,
-    maxWidth: 1000,
-    alignSelf: 'center',
-    width: '100%',
+    paddingBottom: 48,
   },
+
+  // Payment Card
   paymentCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -472,115 +523,101 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   tabletPaymentCard: {
+    borderRadius: 16,
     padding: 20,
-    borderRadius: 14,
     marginBottom: 16,
   },
+
+  // Payment Header
   paymentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    alignItems: 'flex-start',
+    marginBottom: 12,
   },
-  memberInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  titleContainer: {
     flex: 1,
+    marginRight: 12,
   },
   memberName: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
     color: '#1f2937',
+    marginBottom: 4,
   },
   tabletMemberName: {
-    fontSize: 18,
+    fontSize: 20,
+  },
+  packageName: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  tabletPackageName: {
+    fontSize: 16,
   },
   statusBadge: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
   },
   statusText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '600',
     color: '#fff',
     textTransform: 'capitalize',
   },
   tabletStatusText: {
-    fontSize: 13,
+    fontSize: 14,
   },
 
-  // Payment Body
-  paymentBody: {
-    gap: 12,
+  // Payment Details
+  paymentDetails: {
+    gap: 8,
   },
-  paymentRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  paymentDetail: {
+  detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  amountLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#2563eb',
-  },
-  tabletAmountLabel: {
-    fontSize: 16,
-  },
-  amountValue: {
+  amount: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#2563eb',
-  },
-  tabletAmountValue: {
-    fontSize: 20,
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  tabletDetailLabel: {
-    fontSize: 16,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '500',
     color: '#1f2937',
   },
-  tabletDetailValue: {
-    fontSize: 16,
+  tabletAmount: {
+    fontSize: 22,
+  },
+  detailText: {
+    fontSize: 15,
+    color: '#6b7280',
+  },
+  tabletDetailText: {
+    fontSize: 17,
   },
 
   // Empty State
   emptyState: {
-    paddingVertical: 80,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 64,
+    paddingHorizontal: 32,
   },
   emptyText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#6b7280',
+    color: '#9ca3af',
     marginTop: 16,
+    marginBottom: 8,
   },
   tabletEmptyText: {
-    fontSize: 20,
+    fontSize: 22,
   },
   emptySubtext: {
     fontSize: 14,
-    color: '#9ca3af',
-    marginTop: 8,
+    color: '#d1d5db',
+    textAlign: 'center',
   },
   tabletEmptySubtext: {
     fontSize: 16,
   },
 });
-
