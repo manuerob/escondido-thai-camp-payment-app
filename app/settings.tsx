@@ -541,6 +541,54 @@ export default function SettingsScreen() {
               </View>
             ))}
           </View>
+
+          {/* Data Management Section */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle]}>Data Management</Text>
+            </View>
+            <View style={[styles.settingItem, styles.dangerItem, isTablet && styles.tabletSettingItem]}>
+              <View style={styles.settingItemLeft}>
+                <Ionicons name="warning" size={isTablet ? 24 : 20} color="#ef4444" />
+                <View>
+                  <Text style={[styles.settingItemText, isTablet && styles.tabletSettingItemText, styles.dangerText]}>
+                    Reset Local Database
+                  </Text>
+                  <Text style={[styles.settingItemSubtext, isTablet && styles.tabletSettingItemSubtext]}>
+                    Clear all local data and recreate tables
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity 
+                onPress={() => {
+                  Alert.alert(
+                    'Reset Database',
+                    'This will delete all local data (members, packages, subscriptions, payments, expenses, todos, schedules, and participations). This action cannot be undone.\n\nNote: This only clears local data. Cloud data will remain if synced.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Reset',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await databaseService.resetDatabase();
+                            Alert.alert('Success', 'Local database has been reset successfully');
+                            loadData();
+                          } catch (error) {
+                            console.error('Error resetting database:', error);
+                            Alert.alert('Error', 'Failed to reset database');
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+                style={[styles.dangerButton, isTablet && styles.tabletDangerButton]}
+              >
+                <Text style={[styles.dangerButtonText, isTablet && styles.tabletDangerButtonText]}>Reset</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </ScrollView>
 
@@ -1136,6 +1184,44 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   tabletCurrencyName: {
+    fontSize: 16,
+  },
+
+  // Data Management / Danger Zone
+  dangerItem: {
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    backgroundColor: '#fef2f2',
+  },
+  dangerText: {
+    color: '#dc2626',
+    fontWeight: '600',
+  },
+  settingItemSubtext: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  tabletSettingItemSubtext: {
+    fontSize: 14,
+  },
+  dangerButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  tabletDangerButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+  },
+  dangerButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tabletDangerButtonText: {
     fontSize: 16,
   },
 });

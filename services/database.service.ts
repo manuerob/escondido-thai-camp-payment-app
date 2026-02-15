@@ -1357,8 +1357,14 @@ class DatabaseService {
 
   async deleteScheduleBlock(id: number): Promise<void> {
     const db = await this.getDatabase();
+    // Soft delete the schedule block
     await db.runAsync(
       'UPDATE schedule_blocks SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [id]
+    );
+    // Also soft delete all participations for this block
+    await db.runAsync(
+      'UPDATE participations SET deleted_at = CURRENT_TIMESTAMP WHERE schedule_block_id = ? AND deleted_at IS NULL',
       [id]
     );
   }
@@ -1408,8 +1414,14 @@ class DatabaseService {
     if (ids.length === 0) return;
     
     const placeholders = ids.map(() => '?').join(',');
+    // Soft delete all blocks in the series
     await db.runAsync(
       `UPDATE schedule_blocks SET deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+      ids
+    );
+    // Also soft delete all participations for these blocks
+    await db.runAsync(
+      `UPDATE participations SET deleted_at = CURRENT_TIMESTAMP WHERE schedule_block_id IN (${placeholders}) AND deleted_at IS NULL`,
       ids
     );
   }
@@ -1441,6 +1453,12 @@ class DatabaseService {
 
   async saveParticipation(input: CreateParticipationInput): Promise<Participation> {
     const db = await this.getDatabase();
+    
+    // Verify the schedule block exists and is not deleted
+    const block = await this.getScheduleBlockById(input.schedule_block_id);
+    if (!block) {
+      throw new Error('Cannot save participation for deleted or non-existent schedule block');
+    }
     
     // Check if participation already exists for this block and date
     const existing = await db.getFirstAsync<Participation>(
@@ -1485,10 +1503,12 @@ class DatabaseService {
   async getParticipation(blockId: number, date: string): Promise<Participation | null> {
     const db = await this.getDatabase();
     const row = await db.getFirstAsync<Participation>(
-      `SELECT * FROM participations 
-       WHERE schedule_block_id = ? 
-       AND participation_date = ? 
-       AND deleted_at IS NULL`,
+      `SELECT p.* FROM participations p
+       INNER JOIN schedule_blocks sb ON p.schedule_block_id = sb.id
+       WHERE p.schedule_block_id = ? 
+       AND p.participation_date = ? 
+       AND p.deleted_at IS NULL
+       AND sb.deleted_at IS NULL`,
       [blockId, date]
     );
     return row || null;
@@ -1497,7 +1517,11 @@ class DatabaseService {
   async getParticipations(): Promise<Participation[]> {
     const db = await this.getDatabase();
     const rows = await db.getAllAsync<Participation>(
-      'SELECT * FROM participations WHERE deleted_at IS NULL ORDER BY participation_date DESC'
+      `SELECT p.* FROM participations p
+       INNER JOIN schedule_blocks sb ON p.schedule_block_id = sb.id
+       WHERE p.deleted_at IS NULL
+       AND sb.deleted_at IS NULL
+       ORDER BY p.participation_date DESC`
     );
     return rows;
   }
@@ -1828,6 +1852,7 @@ class DatabaseService {
       DROP TABLE IF EXISTS expenses;
       DROP TABLE IF EXISTS todos;
       DROP TABLE IF EXISTS schedule_blocks;
+      DROP TABLE IF EXISTS participations;
       DROP TABLE IF EXISTS app_metadata;
     `);
     

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   TextInput,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -112,6 +113,16 @@ export default function HomeScreen() {
       console.log(`Saved ${count} participants for block ${blockId}`);
     } catch (error) {
       console.error('Error saving participation:', error);
+      // If the block was deleted, show alert and reload schedule
+      if (error instanceof Error && error.message.includes('deleted or non-existent')) {
+        Alert.alert(
+          'Block Unavailable',
+          'This schedule block has been deleted. The schedule will be refreshed.',
+          [{ text: 'OK', onPress: () => loadTodaysSchedule() }]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to save participant count. Please try again.');
+      }
     }
   };
 
