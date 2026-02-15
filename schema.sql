@@ -129,6 +129,22 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
 );
 
 -- ============================================
+-- PARTICIPATIONS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS participations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  schedule_block_id INTEGER NOT NULL,
+  participation_date TEXT NOT NULL, -- Format: YYYY-MM-DD
+  participants_count INTEGER NOT NULL DEFAULT 0 CHECK(participants_count >= 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+  deleted_at TEXT,
+  FOREIGN KEY (schedule_block_id) REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+  UNIQUE(schedule_block_id, participation_date)
+);
+
+-- ============================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================
 

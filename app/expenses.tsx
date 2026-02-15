@@ -520,10 +520,10 @@ export default function ExpensesScreen() {
                 </View>
               </View>
 
-              {/* Made By Input */}
+              {/* Paid By Input */}
               <View style={styles.formSection}>
                 <Text style={[styles.label, isTablet && styles.tabletLabel]}>
-                  Made By
+                  Paid By
                 </Text>
                 <TextInput
                   style={[styles.input, isTablet && styles.tabletInput]}

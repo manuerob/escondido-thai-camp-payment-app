@@ -260,6 +260,26 @@ export interface UpdateScheduleBlockInput {
 }
 
 // ============================================
+// PARTICIPATION INTERFACE
+// ============================================
+
+export interface Participation extends BaseEntity {
+  schedule_block_id: number;
+  participation_date: string; // Format: "YYYY-MM-DD"
+  participants_count: number;
+}
+
+export interface CreateParticipationInput {
+  schedule_block_id: number;
+  participation_date: string;
+  participants_count: number;
+}
+
+export interface UpdateParticipationInput {
+  participants_count?: number;
+}
+
+// ============================================
 // JOINED DATA INTERFACES
 // ============================================
 

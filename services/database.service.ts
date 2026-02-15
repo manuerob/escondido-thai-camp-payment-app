@@ -8,6 +8,7 @@ import type {
   Expense,
   Todo,
   ScheduleBlock,
+  Participation,
   CreateMemberInput,
   UpdateMemberInput,
   CreatePackageInput,
@@ -22,6 +23,8 @@ import type {
   UpdateTodoInput,
   CreateScheduleBlockInput,
   UpdateScheduleBlockInput,
+  CreateParticipationInput,
+  UpdateParticipationInput,
   PaginationParams,
   DateRangeFilter,
   MemberWithSubscription,
@@ -223,6 +226,7 @@ class DatabaseService {
               OLD.title != NEW.title OR
               OLD.description != NEW.description OR
               OLD.color != NEW.color OR
+              OLD.participants_count != NEW.participants_count OR
               OLD.deleted_at != NEW.deleted_at
             )
           BEGIN
@@ -246,6 +250,57 @@ class DatabaseService {
     } catch (error) {
       // Table doesn't exist yet, that's fine
       console.log('No migration needed');
+    }
+
+    // Check if participations table exists, create it if it doesn't (additive migration)
+    try {
+      const tableExists = await this.db.getFirstAsync<any>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='participations'"
+      );
+
+      if (!tableExists) {
+        console.log('📝 Creating participations table...');
+        await this.db.execAsync(`
+          CREATE TABLE IF NOT EXISTS participations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_block_id INTEGER NOT NULL,
+            participation_date TEXT NOT NULL,
+            participants_count INTEGER NOT NULL DEFAULT 0 CHECK(participants_count >= 0),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+            deleted_at TEXT,
+            FOREIGN KEY (schedule_block_id) REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+            UNIQUE(schedule_block_id, participation_date)
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_participations_block_id ON participations(schedule_block_id) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_participations_date ON participations(participation_date) WHERE deleted_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_participations_sync_status ON participations(sync_status) WHERE deleted_at IS NULL;
+
+          CREATE TRIGGER IF NOT EXISTS update_participations_updated_at
+            AFTER UPDATE ON participations
+            FOR EACH ROW
+            WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+          BEGIN
+            UPDATE participations SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+          END;
+
+          CREATE TRIGGER IF NOT EXISTS reset_participations_sync_status
+            AFTER UPDATE ON participations
+            FOR EACH ROW
+            WHEN NEW.sync_status = 'synced' AND (
+              OLD.participants_count != NEW.participants_count OR
+              OLD.deleted_at != NEW.deleted_at
+            )
+          BEGIN
+            UPDATE participations SET sync_status = 'pending' WHERE id = NEW.id;
+          END;
+        `);
+        console.log('✅ Participations table created successfully');
+      }
+    } catch (error) {
+      console.log('No participations migration needed');
     }
   }
 
@@ -1357,6 +1412,94 @@ class DatabaseService {
       `UPDATE schedule_blocks SET deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
       ids
     );
+  }
+
+  async getTodaysScheduleBlocks(): Promise<ScheduleBlock[]> {
+    const db = await this.getDatabase();
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    // Get all blocks for today (both past and upcoming)
+    const rows = await db.getAllAsync<ScheduleBlock>(
+      `SELECT * FROM schedule_blocks 
+       WHERE deleted_at IS NULL 
+       AND (
+         (day_of_week = ? AND specific_date IS NULL) OR
+         (specific_date = ?)
+       )
+       ORDER BY start_time ASC`,
+      [dayOfWeek, today]
+    );
+    return rows;
+  }
+
+
+  // ============================================
+  // PARTICIPATION METHODS
+  // ============================================
+
+  async saveParticipation(input: CreateParticipationInput): Promise<Participation> {
+    const db = await this.getDatabase();
+    
+    // Check if participation already exists for this block and date
+    const existing = await db.getFirstAsync<Participation>(
+      `SELECT * FROM participations 
+       WHERE schedule_block_id = ? 
+       AND participation_date = ? 
+       AND deleted_at IS NULL`,
+      [input.schedule_block_id, input.participation_date]
+    );
+
+    if (existing) {
+      // Update existing participation
+      await db.runAsync(
+        `UPDATE participations 
+         SET participants_count = ?, 
+             updated_at = CURRENT_TIMESTAMP,
+             sync_status = 'pending'
+         WHERE id = ?`,
+        [input.participants_count, existing.id]
+      );
+      return this.getParticipationById(existing.id) as Promise<Participation>;
+    } else {
+      // Create new participation
+      const result = await db.runAsync(
+        `INSERT INTO participations (schedule_block_id, participation_date, participants_count)
+         VALUES (?, ?, ?)`,
+        [input.schedule_block_id, input.participation_date, input.participants_count]
+      );
+      return this.getParticipationById(result.lastInsertRowId!) as Promise<Participation>;
+    }
+  }
+
+  async getParticipationById(id: number): Promise<Participation | null> {
+    const db = await this.getDatabase();
+    const row = await db.getFirstAsync<Participation>(
+      'SELECT * FROM participations WHERE id = ? AND deleted_at IS NULL',
+      [id]
+    );
+    return row || null;
+  }
+
+  async getParticipation(blockId: number, date: string): Promise<Participation | null> {
+    const db = await this.getDatabase();
+    const row = await db.getFirstAsync<Participation>(
+      `SELECT * FROM participations 
+       WHERE schedule_block_id = ? 
+       AND participation_date = ? 
+       AND deleted_at IS NULL`,
+      [blockId, date]
+    );
+    return row || null;
+  }
+
+  async getParticipations(): Promise<Participation[]> {
+    const db = await this.getDatabase();
+    const rows = await db.getAllAsync<Participation>(
+      'SELECT * FROM participations WHERE deleted_at IS NULL ORDER BY participation_date DESC'
+    );
+    return rows;
   }
 
 
