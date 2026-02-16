@@ -29,13 +29,14 @@ export default function HomeScreen() {
   const [participantCounts, setParticipantCounts] = useState<{ [blockId: number]: string }>({});
   const [loading, setLoading] = useState(true);
   const [loadingSchedule, setLoadingSchedule] = useState(true);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
   // Load stats when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
       loadStats();
       loadTodaysSchedule();
-    }, [])
+    }, [selectedDate])
   );
 
   const loadStats = async () => {
@@ -53,15 +54,15 @@ export default function HomeScreen() {
   const loadTodaysSchedule = async () => {
     try {
       setLoadingSchedule(true);
-      const blocks = await databaseService.getTodaysScheduleBlocks();
+      const blocks = await databaseService.getScheduleBlocksForDate(selectedDate);
       setTodaysBlocks(blocks);
       
-      // Load existing participations for today
-      const today = new Date().toISOString().split('T')[0];
+      // Load existing participations for selected date
+      const dateString = selectedDate.toISOString().split('T')[0];
       const counts: { [blockId: number]: string } = {};
       
       for (const block of blocks) {
-        const participation = await databaseService.getParticipation(block.id, today);
+        const participation = await databaseService.getParticipation(block.id, dateString);
         if (participation) {
           counts[block.id] = participation.participants_count.toString();
         }
@@ -82,15 +83,43 @@ export default function HomeScreen() {
 
   const getBlockStatus = (block: ScheduleBlock): 'past' | 'current' | 'upcoming' => {
     const currentTime = getCurrentTime();
+    const isToday = isSelectedDateToday();
+    
+    // Only use time-based status for today
+    if (!isToday) return 'past';
+    
     if (block.end_time <= currentTime) return 'past';
     if (block.start_time <= currentTime && block.end_time > currentTime) return 'current';
     return 'upcoming';
   };
 
-  const getTodayDateString = () => {
+  const isSelectedDateToday = (): boolean => {
+    const today = new Date();
+    return selectedDate.toISOString().split('T')[0] === today.toISOString().split('T')[0];
+  };
+
+  const getDateString = () => {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const now = new Date();
-    return `${days[now.getDay()]} ${now.getDate()}`;
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    return `${days[selectedDate.getDay()]}, ${months[selectedDate.getMonth()]} ${selectedDate.getDate()}`;
+  };
+
+  const navigateDate = (direction: 'prev' | 'next') => {
+    const newDate = new Date(selectedDate);
+    if (direction === 'prev') {
+      newDate.setDate(newDate.getDate() - 1);
+    } else {
+      newDate.setDate(newDate.getDate() + 1);
+    }
+    setSelectedDate(newDate);
+  };
+
+  const canNavigateForward = (): boolean => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selected = new Date(selectedDate);
+    selected.setHours(0, 0, 0, 0);
+    return selected < today;
   };
 
   const handleParticipantChange = (blockId: number, value: string) => {
@@ -120,13 +149,13 @@ export default function HomeScreen() {
     if (participantCount === 0) return;
     
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const dateString = selectedDate.toISOString().split('T')[0];
       await databaseService.saveParticipation({
         schedule_block_id: blockId,
-        participation_date: today,
+        participation_date: dateString,
         participants_count: participantCount,
       });
-      console.log(`Saved ${participantCount} participants for block ${blockId}`);
+      console.log(`Saved ${participantCount} participants for block ${blockId} on ${dateString}`);
     } catch (error) {
       console.error('Error saving participation:', error);
       // If the block was deleted, show alert and reload schedule
@@ -231,14 +260,42 @@ export default function HomeScreen() {
                 styles.sectionTitle,
                 isTablet && styles.tabletSectionTitle
               ]}>
-                Today's Schedule
+                {isSelectedDateToday() ? "Today's Schedule" : "Schedule"}
               </Text>
-              <Text style={[
-                styles.dateText,
-                isTablet && styles.tabletDateText
-              ]}>
-                {getTodayDateString()}
-              </Text>
+              <View style={styles.dateNavigation}>
+                <TouchableOpacity
+                  style={[
+                    styles.dateNavButton,
+                    isTablet && styles.tabletDateNavButton
+                  ]}
+                  onPress={() => navigateDate('prev')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-back" size={isTablet ? 24 : 20} color="#2563eb" />
+                </TouchableOpacity>
+                <Text style={[
+                  styles.dateText,
+                  isTablet && styles.tabletDateText
+                ]}>
+                  {getDateString()}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.dateNavButton,
+                    isTablet && styles.tabletDateNavButton,
+                    !canNavigateForward() && styles.dateNavButtonDisabled
+                  ]}
+                  onPress={() => navigateDate('next')}
+                  activeOpacity={0.7}
+                  disabled={!canNavigateForward()}
+                >
+                  <Ionicons 
+                    name="chevron-forward" 
+                    size={isTablet ? 24 : 20} 
+                    color={canNavigateForward() ? "#2563eb" : "#d1d5db"} 
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
             
             {loadingSchedule ? (
@@ -275,7 +332,10 @@ export default function HomeScreen() {
                             { borderLeftColor: block.color || '#2563eb' }
                           ]}
                         >
-                          <View style={styles.scheduleBlockHeader}>
+                          <View style={[
+                            styles.scheduleBlockHeader,
+                            status === 'past' && styles.scheduleBlockHeaderPast
+                          ]}>
                             <View style={styles.scheduleBlockTime}>
                               <Ionicons 
                                 name={status === 'past' ? 'checkmark-circle' : status === 'current' ? 'radio-button-on' : 'time-outline'} 
@@ -500,6 +560,30 @@ const styles = StyleSheet.create({
   tabletDateText: {
     fontSize: 16,
   },
+  dateNavigation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 8,
+  },
+  dateNavButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabletDateNavButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+  },
+  dateNavButtonDisabled: {
+    opacity: 0.4,
+  },
   scheduleCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -532,7 +616,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   scheduleBlockPast: {
-    opacity: 0.5,
+    // Opacity removed - applied to header only
   },
   scheduleBlockCurrent: {
     backgroundColor: '#fffbeb',
@@ -543,6 +627,9 @@ const styles = StyleSheet.create({
   },
   scheduleBlockHeader: {
     gap: 6,
+  },
+  scheduleBlockHeaderPast: {
+    opacity: 0.5,
   },
   scheduleBlockTime: {
     flexDirection: 'row',

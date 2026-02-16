@@ -1655,6 +1655,25 @@ class DatabaseService {
     return rows;
   }
 
+  async getScheduleBlocksForDate(date: Date): Promise<ScheduleBlock[]> {
+    const db = await this.getDatabase();
+    const dayOfWeek = date.getDay();
+    const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    // Get all blocks for the specified date (both recurring and specific)
+    const rows = await db.getAllAsync<ScheduleBlock>(
+      `SELECT * FROM schedule_blocks 
+       WHERE deleted_at IS NULL 
+       AND (
+         (day_of_week = ? AND specific_date IS NULL) OR
+         (specific_date = ?)
+       )
+       ORDER BY start_time ASC`,
+      [dayOfWeek, dateString]
+    );
+    return rows;
+  }
+
 
   // ============================================
   // PARTICIPATION METHODS
