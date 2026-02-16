@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   StyleSheet, 
   Text, 
@@ -22,6 +22,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import { useCurrency } from '../hooks';
 import type { MemberWithSubscription, SubscriptionStatus, Package, PaymentMethod, PaymentStatus } from '../types/database';
+import { FilterBar, type FilterOption, type FilterGroup } from '../components/FilterBar';
 
 const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending'];
 
@@ -31,7 +32,6 @@ export default function MembersScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
   const router = useRouter();
-  const searchInputRef = useRef<TextInput>(null);
   const { formatCurrency, getCurrencySymbol } = useCurrency();
 
   const [members, setMembers] = useState<MemberWithSubscription[]>([]);
@@ -40,6 +40,7 @@ export default function MembersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all');
   const [packageFilter, setPackageFilter] = useState<string>('all');
+  const [filtersLocked, setFiltersLocked] = useState(false);
   const [availablePackages, setAvailablePackages] = useState<string[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(['cash', 'card', 'bank_transfer', 'digital_wallet', 'other']);
   const [refreshing, setRefreshing] = useState(false);
@@ -79,13 +80,20 @@ export default function MembersScreen() {
   // Load members when screen comes into focus or filter/search changes
   useFocusEffect(
     React.useCallback(() => {
+      // Reset filters and search unless locked
+      if (!filtersLocked) {
+        setStatusFilter('all');
+        setPackageFilter('all');
+        setSearchQuery('');
+      }
+      
       loadSettings();
       if (searchQuery.trim()) {
         searchMembers();
       } else {
         loadMembers();
       }
-    }, [searchQuery])
+    }, [searchQuery, filtersLocked])
   );
 
   // Apply filters whenever members or filters change
@@ -410,193 +418,67 @@ export default function MembersScreen() {
     <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()} accessible={false}>
       <View style={styles.container}>
         <StatusBar style="auto" />
-      
-      {/* Search Bar */}
-      <View style={[styles.searchContainer, isTablet && styles.tabletSearchContainer]}>
-        <Ionicons name="search" size={isTablet ? 24 : 20} color="#666" style={styles.searchIcon} />
-        <TextInput
-          ref={searchInputRef}
-          style={[styles.searchInput, isTablet && styles.tabletSearchInput]}
-          placeholder="Search members..."
-          placeholderTextColor="#999"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          returnKeyType="search"
-          blurOnSubmit={true}
-          onSubmitEditing={() => searchInputRef.current?.blur()}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => {
-            setSearchQuery('');
-            Keyboard.dismiss();
-          }}>
-            <Ionicons name="close-circle" size={isTablet ? 24 : 20} color="#999" />
-          </TouchableOpacity>
-        )}
-      </View>
 
-      {/* Status Filters */}
-      <View style={styles.filterSection}>
-        <Text style={[styles.filterSectionLabel, isTablet && styles.tabletFilterSectionLabel]}>Status</Text>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={[styles.filterScrollContent, isTablet && styles.tabletFilterScrollContent]}
-        >
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'all' && styles.filterChipActive
-            ]}
-            onPress={() => {
-              setStatusFilter('all');
+      {/* Filters */}
+      <FilterBar filters={(() => {
+        const statusFilterOptions: FilterOption[] = [
+          { value: 'all', label: 'All Statuses' },
+          { value: 'active', label: 'Active', icon: 'checkmark-circle', color: '#10b981' },
+          { value: 'expired', label: 'Expired', icon: 'close-circle', color: '#ef4444' },
+          { value: 'expires_soon', label: 'Expires Soon', icon: 'alert-circle', color: '#f59e0b' },
+        ];
+
+        const packageFilterOptions: FilterOption[] = [
+          { value: 'all', label: 'All Packages' },
+          ...availablePackages.map(pkg => ({
+            value: pkg,
+            label: pkg,
+            icon: 'cube' as keyof typeof Ionicons.glyphMap,
+          })),
+        ];
+
+        const filterGroups: FilterGroup[] = [
+          {
+            id: 'status',
+            label: 'Member Status',
+            options: statusFilterOptions,
+            activeValue: statusFilter,
+            onChange: (value) => {
+              setStatusFilter(value as StatusFilterType);
               Keyboard.dismiss();
-            }}
-          >
-            <Text style={[
-              styles.filterChipText,
-              isTablet && styles.tabletFilterChipText,
-              statusFilter === 'all' && styles.filterChipTextActive
-            ]}>
-              All
-            </Text>
-          </TouchableOpacity>
+            },
+          },
+        ];
 
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'active' && styles.filterChipActive
-            ]}
-            onPress={() => {
-              setStatusFilter('active');
+        if (availablePackages.length > 0) {
+          filterGroups.push({
+            id: 'package',
+            label: 'Package',
+            options: packageFilterOptions,
+            activeValue: packageFilter,
+            onChange: (value) => {
+              setPackageFilter(value);
               Keyboard.dismiss();
-            }}
-          >
-            <Ionicons 
-              name="checkmark-circle" 
-              size={16} 
-              color={statusFilter === 'active' ? '#10b981' : '#6b7280'} 
-            />
-            <Text style={[
-              styles.filterChipText,
-              isTablet && styles.tabletFilterChipText,
-              statusFilter === 'active' && styles.filterChipTextActive
-            ]}>
-              Active
-            </Text>
-          </TouchableOpacity>
+            },
+          });
+        }
 
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'expired' && styles.filterChipActive
-            ]}
-            onPress={() => {
-              setStatusFilter('expired');
-              Keyboard.dismiss();
-            }}
-          >
-            <Ionicons 
-              name="close-circle" 
-              size={16} 
-              color={statusFilter === 'expired' ? '#ef4444' : '#6b7280'} 
-            />
-            <Text style={[
-              styles.filterChipText,
-              isTablet && styles.tabletFilterChipText,
-              statusFilter === 'expired' && styles.filterChipTextActive
-            ]}>
-              Expired
-            </Text>
-          </TouchableOpacity>
+        return filterGroups;
+      })()} 
+        isLocked={filtersLocked}
+        onToggleLock={() => setFiltersLocked(!filtersLocked)}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Search members..."
+      />
 
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'expires_soon' && styles.filterChipActive
-            ]}
-            onPress={() => {
-              setStatusFilter('expires_soon');
-              Keyboard.dismiss();
-            }}
-          >
-            <Ionicons 
-              name="alert-circle" 
-              size={16} 
-              color={statusFilter === 'expires_soon' ? '#f59e0b' : '#6b7280'} 
-            />
-            <Text style={[
-              styles.filterChipText,
-              isTablet && styles.tabletFilterChipText,
-              statusFilter === 'expires_soon' && styles.filterChipTextActive
-            ]}>
-              Expires Soon
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-
-      {/* Package Filters */}
-      {availablePackages.length > 0 && (
-        <View style={styles.filterSection}>
-          <Text style={[styles.filterSectionLabel, isTablet && styles.tabletFilterSectionLabel]}>Package</Text>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[styles.filterScrollContent, isTablet && styles.tabletFilterScrollContent]}
-          >
-            <TouchableOpacity
-              style={[
-                styles.filterChip,
-                isTablet && styles.tabletFilterChip,
-                packageFilter === 'all' && styles.filterChipActive
-              ]}
-              onPress={() => {
-                setPackageFilter('all');
-                Keyboard.dismiss();
-              }}
-            >
-              <Text style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                packageFilter === 'all' && styles.filterChipTextActive
-              ]}>
-                All Packages
-              </Text>
-            </TouchableOpacity>
-
-            {availablePackages.map(pkg => (
-              <TouchableOpacity
-                key={pkg}
-                style={[
-                  styles.filterChip,
-                  isTablet && styles.tabletFilterChip,
-                  packageFilter === pkg && styles.filterChipActive
-                ]}
-                onPress={() => {
-                  setPackageFilter(pkg);
-                  Keyboard.dismiss();
-                }}
-              >
-                <Ionicons 
-                  name="cube" 
-                  size={16} 
-                  color={packageFilter === pkg ? '#2563eb' : '#6b7280'} 
-                />
-                <Text style={[
-                  styles.filterChipText,
-                  isTablet && styles.tabletFilterChipText,
-                  packageFilter === pkg && styles.filterChipTextActive
-                ]}>
-                  {pkg}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+      {/* Total Display */}
+      {filteredMembers.length > 0 && (
+        <View style={[styles.totalContainer, isTablet && styles.tabletTotalContainer]}>
+          <Text style={[styles.totalLabel, isTablet && styles.tabletTotalLabel]}>Total:</Text>
+          <Text style={[styles.totalCount, isTablet && styles.tabletTotalCount]}>
+            {filteredMembers.length} {filteredMembers.length === 1 ? 'member' : 'members'}
+          </Text>
         </View>
       )}
 
@@ -885,111 +767,46 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   
-  // Search Bar
-  searchContainer: {
+  // Total Display
+  totalContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
+    justifyContent: 'center',
     paddingVertical: 12,
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 12,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    paddingHorizontal: 16,
+    backgroundColor: '#eff6ff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#bfdbfe',
+    gap: 8,
   },
-  tabletSearchContainer: {
-    paddingHorizontal: 20,
+  tabletTotalContainer: {
     paddingVertical: 16,
-    marginHorizontal: 24,
-    marginTop: 20,
-    marginBottom: 16,
   },
-  searchIcon: {
-    marginRight: 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
+  totalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
     color: '#1f2937',
   },
-  tabletSearchInput: {
-    fontSize: 18,
-  },
-  
-  // Filters
-  // Filters
-  filterSection: {
-    paddingHorizontal: 16,
-    marginBottom: 12,
-  },
-  filterSectionLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#6b7280',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  tabletFilterSectionLabel: {
-    fontSize: 14,
-    marginBottom: 10,
-  },
-  filterScrollContent: {
-    gap: 8,
-    paddingVertical: 4,
-  },
-  tabletFilterScrollContent: {
-    gap: 12,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  tabletFilterChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  filterChipActive: {
-    backgroundColor: '#eff6ff',
-    borderColor: '#2563eb',
-  },
-  filterChipText: {
-    fontSize: 14,
-    color: '#6b7280',
-    fontWeight: '500',
-  },
-  tabletFilterChipText: {
+  tabletTotalLabel: {
     fontSize: 16,
   },
-  filterChipTextActive: {
+  totalCount: {
+    fontSize: 18,
+    fontWeight: '700',
     color: '#2563eb',
-    fontWeight: '600',
+  },
+  tabletTotalCount: {
+    fontSize: 20,
   },
   
   // List
   listContent: {
+    paddingTop: 12,
     paddingHorizontal: 16,
     paddingBottom: 100,
   },
   tabletListContent: {
+    paddingTop: 16,
     paddingHorizontal: 24,
     paddingBottom: 120,
   },

@@ -21,6 +21,9 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import { useCurrency } from '../hooks';
 import type { Expense, PaymentMethod } from '../types/database';
+import { FilterBar, type FilterOption, type FilterGroup } from '../components/FilterBar';
+
+type DateFilter = 'all' | 'today' | 'this_month';
 
 export default function ExpensesScreen() {
   const { width } = useWindowDimensions();
@@ -32,7 +35,9 @@ export default function ExpensesScreen() {
   const [filteredExpenses, setFilteredExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [filtersLocked, setFiltersLocked] = useState(false);
   const [categories, setCategories] = useState<string[]>(['Equipment', 'Utilities', 'Rent', 'Supplies', 'Maintenance', 'Marketing', 'Staff', 'Other']);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(['cash', 'card', 'bank_transfer', 'digital_wallet']);
   
@@ -50,9 +55,14 @@ export default function ExpensesScreen() {
   // Load expenses when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
+      // Reset filters unless locked
+      if (!filtersLocked) {
+        setDateFilter('all');
+        setCategoryFilter('all');
+      }
       loadExpenses();
       loadSettings();
-    }, [])
+    }, [filtersLocked])
   );
 
   const loadSettings = async () => {
@@ -79,7 +89,7 @@ export default function ExpensesScreen() {
       const data = await databaseService.getExpensesByDateRange({});
       console.log('Expenses loaded:', data.length, 'items');
       setExpenses(data);
-      filterExpenses(data, categoryFilter);
+      filterExpenses(data, categoryFilter, dateFilter);
     } catch (error) {
       console.error('Error loading expenses:', error);
       Alert.alert('Error', 'Failed to load expenses');
@@ -88,18 +98,40 @@ export default function ExpensesScreen() {
     }
   };
 
-  const filterExpenses = (data: Expense[], filter: string) => {
-    if (filter === 'all') {
-      setFilteredExpenses(data);
-    } else {
-      setFilteredExpenses(data.filter(e => e.category === filter));
+  const filterExpenses = (data: Expense[], catFilter: string, dtFilter: DateFilter) => {
+    let result = [...data];
+
+    // Apply date filter
+    if (dtFilter !== 'all') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      result = result.filter(expense => {
+        const expenseDate = new Date(expense.expense_date);
+        expenseDate.setHours(0, 0, 0, 0);
+
+        if (dtFilter === 'today') {
+          return expenseDate.getTime() === today.getTime();
+        } else if (dtFilter === 'this_month') {
+          return expenseDate.getMonth() === today.getMonth() &&
+                 expenseDate.getFullYear() === today.getFullYear();
+        }
+        return true;
+      });
     }
+
+    // Apply category filter
+    if (catFilter !== 'all') {
+      result = result.filter(e => e.category === catFilter);
+    }
+
+    setFilteredExpenses(result);
   };
 
-  // Update filter
+  // Update filters
   useEffect(() => {
-    filterExpenses(expenses, categoryFilter);
-  }, [categoryFilter]);
+    filterExpenses(expenses, categoryFilter, dateFilter);
+  }, [categoryFilter, dateFilter]);
 
   const getTotalAmount = (): number => {
     return filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
@@ -289,59 +321,49 @@ export default function ExpensesScreen() {
     );
   }
 
+  // Build filter options
+  const dateFilterOptions: FilterOption[] = [
+    { value: 'all', label: 'All Time' },
+    { value: 'today', label: 'Today', icon: 'today' },
+    { value: 'this_month', label: 'This Month', icon: 'calendar' },
+  ];
+
+  const categoryFilterOptions: FilterOption[] = [
+    { value: 'all', label: 'All Categories' },
+    ...categories.filter(c => c).map(cat => ({
+      value: cat,
+      label: cat,
+      color: getCategoryColor(cat),
+    })),
+  ];
+
+  const filters: FilterGroup[] = [
+    {
+      id: 'date',
+      label: 'Date Range',
+      options: dateFilterOptions,
+      activeValue: dateFilter,
+      onChange: (value) => setDateFilter(value as DateFilter),
+    },
+    {
+      id: 'category',
+      label: 'Category',
+      options: categoryFilterOptions,
+      activeValue: categoryFilter,
+      onChange: setCategoryFilter,
+    },
+  ];
+
   return (
     <View style={styles.container}>
       <StatusBar style="auto" />
 
-      {/* Category Filters */}
-      <View style={[styles.filterContainer, isTablet && styles.tabletFilterContainer]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScroll}
-        >
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              categoryFilter === 'all' && styles.filterChipActive,
-            ]}
-            onPress={() => setCategoryFilter('all')}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                categoryFilter === 'all' && styles.filterChipTextActive,
-              ]}
-            >
-              All
-            </Text>
-          </TouchableOpacity>
-          {categories.filter(c => c).map((cat) => (
-            <TouchableOpacity
-              key={cat}
-              style={[
-                styles.filterChip,
-                isTablet && styles.tabletFilterChip,
-                categoryFilter === cat && styles.filterChipActive,
-                categoryFilter === cat && { backgroundColor: getCategoryColor(cat), borderColor: getCategoryColor(cat) },
-              ]}
-              onPress={() => setCategoryFilter(cat)}
-            >
-              <Text
-                style={[
-                  styles.filterChipText,
-                  isTablet && styles.tabletFilterChipText,
-                  categoryFilter === cat && styles.filterChipTextActive,
-                ]}
-              >
-                {cat}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+      {/* Filters */}
+      <FilterBar 
+        filters={filters} 
+        isLocked={filtersLocked}
+        onToggleLock={() => setFiltersLocked(!filtersLocked)}
+      />
 
       {/* Total Display */}
       {filteredExpenses.length > 0 && (
@@ -605,50 +627,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-
-  // Filters
-  filterContainer: {
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-    paddingVertical: 12,
-  },
-  tabletFilterContainer: {
-    paddingVertical: 16,
-  },
-  filterScroll: {
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#f9fafb',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginRight: 8,
-  },
-  tabletFilterChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  filterChipActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
-  },
-  filterChipText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6b7280',
-  },
-  tabletFilterChipText: {
-    fontSize: 16,
-  },
-  filterChipTextActive: {
-    color: '#fff',
-    fontWeight: '600',
   },
 
   // Total Display

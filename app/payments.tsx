@@ -16,6 +16,7 @@ import { useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import { useCurrency } from '../hooks';
 import type { PaymentWithDetails, PaymentStatus, PaymentMethod } from '../types/database';
+import { FilterBar, type FilterOption, type FilterGroup } from '../components/FilterBar';
 
 type DateFilter = 'all' | 'today' | 'this_month';
 type StatusFilter = 'all' | 'completed' | 'pending' | 'failed' | 'refunded';
@@ -29,14 +30,20 @@ export default function PaymentsScreen() {
   const [filteredPayments, setFilteredPayments] = useState<PaymentWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('today');
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [filtersLocked, setFiltersLocked] = useState(false);
 
   // Load payments when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
+      // Reset filters unless locked
+      if (!filtersLocked) {
+        setDateFilter('all');
+        setStatusFilter('all');
+      }
       loadPayments();
-    }, [])
+    }, [filtersLocked])
   );
 
   // Apply filters whenever payments or filters change
@@ -128,6 +135,38 @@ export default function PaymentsScreen() {
     return colors[status] || '#6b7280';
   };
 
+  // Build filter options
+  const dateFilterOptions: FilterOption[] = [
+    { value: 'all', label: 'All Time' },
+    { value: 'today', label: 'Today', icon: 'today' },
+    { value: 'this_month', label: 'This Month', icon: 'calendar' },
+  ];
+
+  const statusFilterOptions: FilterOption[] = [
+    { value: 'all', label: 'All Status' },
+    { value: 'completed', label: 'Completed', color: getStatusColor('completed') },
+    { value: 'pending', label: 'Pending', color: getStatusColor('pending') },
+    { value: 'failed', label: 'Failed', color: getStatusColor('failed') },
+    { value: 'refunded', label: 'Refunded', color: getStatusColor('refunded') },
+  ];
+
+  const filters: FilterGroup[] = [
+    {
+      id: 'date',
+      label: 'Date Range',
+      options: dateFilterOptions,
+      activeValue: dateFilter,
+      onChange: (value) => setDateFilter(value as DateFilter),
+    },
+    {
+      id: 'status',
+      label: 'Payment Status',
+      options: statusFilterOptions,
+      activeValue: statusFilter,
+      onChange: (value) => setStatusFilter(value as StatusFilter),
+    },
+  ];
+
   const formatPaymentMethod = (method: PaymentMethod): string => {
     return method.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase());
   };
@@ -214,169 +253,12 @@ export default function PaymentsScreen() {
     <View style={styles.container}>
       <StatusBar style="auto" />
 
-      {/* Date Filter Chips */}
-      <View style={[styles.filterContainer, isTablet && styles.tabletFilterContainer]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScroll}
-        >
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              dateFilter === 'all' && styles.filterChipActive,
-            ]}
-            onPress={() => setDateFilter('all')}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                dateFilter === 'all' && styles.filterChipTextActive,
-              ]}
-            >
-              All Time
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              dateFilter === 'today' && styles.filterChipActive,
-            ]}
-            onPress={() => setDateFilter('today')}
-          >
-            <Ionicons
-              name="today"
-              size={16}
-              color={dateFilter === 'today' ? '#2563eb' : '#6b7280'}
-            />
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                dateFilter === 'today' && styles.filterChipTextActive,
-              ]}
-            >
-              Today
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              dateFilter === 'this_month' && styles.filterChipActive,
-            ]}
-            onPress={() => setDateFilter('this_month')}
-          >
-            <Ionicons
-              name="calendar"
-              size={16}
-              color={dateFilter === 'this_month' ? '#2563eb' : '#6b7280'}
-            />
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                dateFilter === 'this_month' && styles.filterChipTextActive,
-              ]}
-            >
-              This Month
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-
-      {/* Status Filter Chips */}
-      <View style={[styles.filterContainer, isTablet && styles.tabletFilterContainer]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScroll}
-        >
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'all' && styles.filterChipActive,
-            ]}
-            onPress={() => setStatusFilter('all')}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                statusFilter === 'all' && styles.filterChipTextActive,
-              ]}
-            >
-              All Status
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'completed' && styles.filterChipActive,
-              statusFilter === 'completed' && { backgroundColor: getStatusColor('completed'), borderColor: getStatusColor('completed') },
-            ]}
-            onPress={() => setStatusFilter('completed')}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                statusFilter === 'completed' && styles.filterChipTextActive,
-              ]}
-            >
-              Completed
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'pending' && styles.filterChipActive,
-              statusFilter === 'pending' && { backgroundColor: getStatusColor('pending'), borderColor: getStatusColor('pending') },
-            ]}
-            onPress={() => setStatusFilter('pending')}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                statusFilter === 'pending' && styles.filterChipTextActive,
-              ]}
-            >
-              Pending
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              isTablet && styles.tabletFilterChip,
-              statusFilter === 'failed' && styles.filterChipActive,
-              statusFilter === 'failed' && { backgroundColor: getStatusColor('failed'), borderColor: getStatusColor('failed') },
-            ]}
-            onPress={() => setStatusFilter('failed')}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                isTablet && styles.tabletFilterChipText,
-                statusFilter === 'failed' && styles.filterChipTextActive,
-              ]}
-            >
-              Failed
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
+      {/* Filters */}
+      <FilterBar 
+        filters={filters}
+        isLocked={filtersLocked}
+        onToggleLock={() => setFiltersLocked(!filtersLocked)}
+      />
 
       {/* Total Display */}
       {filteredPayments.length > 0 && (
@@ -419,55 +301,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // Filter Container
-  filterContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  tabletFilterContainer: {
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-  },
-  filterScroll: {
-    gap: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  tabletFilterChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 24,
-    gap: 8,
-  },
-  filterChipActive: {
-    backgroundColor: '#eff6ff',
-    borderColor: '#2563eb',
-  },
-  filterChipText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6b7280',
-  },
-  tabletFilterChipText: {
-    fontSize: 16,
-  },
-  filterChipTextActive: {
-    color: '#2563eb',
-    fontWeight: '600',
-  },
-
   // Total Container
   totalContainer: {
     flexDirection: 'row',
@@ -475,9 +308,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#fff',
+    backgroundColor: '#eff6ff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: '#bfdbfe',
     gap: 8,
   },
   tabletTotalContainer: {
@@ -487,7 +320,7 @@ const styles = StyleSheet.create({
   totalLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6b7280',
+    color: '#1f2937',
   },
   tabletTotalLabel: {
     fontSize: 16,
@@ -495,14 +328,14 @@ const styles = StyleSheet.create({
   totalAmount: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1f2937',
+    color: '#2563eb',
   },
   tabletTotalAmount: {
     fontSize: 22,
   },
   totalCount: {
     fontSize: 13,
-    color: '#9ca3af',
+    color: '#6b7280',
   },
   tabletTotalCount: {
     fontSize: 15,
