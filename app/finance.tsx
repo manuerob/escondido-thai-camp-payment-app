@@ -117,42 +117,43 @@ export default function FinanceScreen() {
               ['1', '2', '3'],
               ['4', '5', '6'],
               ['7', '8', '9'],
-              ['', '0', 'back'],
             ].map((row, rowIndex) => (
               <View key={rowIndex} style={styles.numpadRow}>
-                {row.map((digit) => {
-                  if (digit === '') {
-                    return <View key="empty" style={styles.numpadButton} />;
-                  }
-                  if (digit === 'back') {
-                    return (
-                      <TouchableOpacity
-                        key="back"
-                        style={[styles.numpadButton, isTablet && styles.tabletNumpadButton]}
-                        onPress={handleBackspace}
-                      >
-                        <Ionicons
-                          name="backspace-outline"
-                          size={isTablet ? 32 : 28}
-                          color="#374151"
-                        />
-                      </TouchableOpacity>
-                    );
-                  }
-                  return (
-                    <TouchableOpacity
-                      key={digit}
-                      style={[styles.numpadButton, isTablet && styles.tabletNumpadButton]}
-                      onPress={() => handlePinPress(digit)}
-                    >
-                      <Text style={[styles.numpadText, isTablet && styles.tabletNumpadText]}>
-                        {digit}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                {row.map((digit) => (
+                  <TouchableOpacity
+                    key={digit}
+                    style={[styles.numpadButton, isTablet && styles.tabletNumpadButton]}
+                    onPress={() => handlePinPress(digit)}
+                  >
+                    <Text style={[styles.numpadText, isTablet && styles.tabletNumpadText]}>
+                      {digit}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             ))}
+            {/* Last row with invisible placeholder for alignment */}
+            <View style={styles.numpadRow}>
+              <View style={[styles.numpadButton, isTablet && styles.tabletNumpadButton, styles.invisibleButton]} />
+              <TouchableOpacity
+                style={[styles.numpadButton, isTablet && styles.tabletNumpadButton]}
+                onPress={() => handlePinPress('0')}
+              >
+                <Text style={[styles.numpadText, isTablet && styles.tabletNumpadText]}>
+                  0
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.numpadButton, isTablet && styles.tabletNumpadButton]}
+                onPress={handleBackspace}
+              >
+                <Ionicons
+                  name="backspace-outline"
+                  size={isTablet ? 28 : 24}
+                  color="#374151"
+                />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -364,16 +365,17 @@ const styles = StyleSheet.create({
 
   // Numpad
   numpad: {
-    gap: 16,
+    gap: 12,
+    marginBottom: 40,
   },
   numpadRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 12,
   },
   numpadButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
@@ -383,18 +385,23 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  invisibleButton: {
+    backgroundColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
   tabletNumpadButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
   },
   numpadText: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '600',
     color: '#1f2937',
   },
   tabletNumpadText: {
-    fontSize: 32,
+    fontSize: 30,
   },
 
   // Content

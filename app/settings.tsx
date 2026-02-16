@@ -18,7 +18,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
-import type { Package, CreatePackageInput, UpdatePackageInput } from '../types/database';
+import type { Package, ExpenseCategory, CreatePackageInput, UpdatePackageInput } from '../types/database';
 
 const CURRENCIES = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -54,7 +54,7 @@ export default function SettingsScreen() {
 
   // State
   const [packages, setPackages] = useState<Package[]>([]);
-  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [enabledPaymentMethods, setEnabledPaymentMethods] = useState<string[]>(DEFAULT_PAYMENT_METHODS.map(m => m.id)); // Store enabled method IDs
   const [currency, setCurrency] = useState('USD');
   const [loading, setLoading] = useState(true);
@@ -71,7 +71,7 @@ export default function SettingsScreen() {
 
   // Category modal state
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategory, setEditingCategory] = useState<ExpenseCategory | null>(null);
   const [categoryName, setCategoryName] = useState('');
 
   // Currency modal state
@@ -92,20 +92,21 @@ export default function SettingsScreen() {
       const pkgs = await databaseService.getAllPackages();
       setPackages(pkgs);
 
+      // Load expense categories from database
+      const expenseCategories = await databaseService.getAllExpenseCategories();
+      setCategories(expenseCategories);
+
       // Load settings from database
       const appSettings = await databaseService.getAppSettings();
       
       if (appSettings) {
-        // Parse JSON strings to arrays
-        const expenseCategories = JSON.parse(appSettings.expense_categories);
+        // Parse JSON string to array
         const enabledPaymentMethods = JSON.parse(appSettings.enabled_payment_methods);
         
-        setCategories(expenseCategories);
         setEnabledPaymentMethods(enabledPaymentMethods);
         setCurrency(appSettings.currency);
       } else {
         // Initialize with defaults if no settings exist (shouldn't happen due to INSERT OR IGNORE)
-        setCategories(DEFAULT_CATEGORIES);
         setEnabledPaymentMethods(DEFAULT_PAYMENT_METHODS.map(m => m.id));
         setCurrency('USD');
       }
@@ -156,6 +157,7 @@ export default function SettingsScreen() {
           sessions_included: packageSessions ? parseInt(packageSessions) : undefined,
         };
         await databaseService.updatePackage(editingPackage.id, input);
+        Alert.alert('Success', 'Package updated');
       } else {
         const input: CreatePackageInput = {
           name: packageName.trim(),
@@ -165,10 +167,15 @@ export default function SettingsScreen() {
           sessions_included: packageSessions ? parseInt(packageSessions) : undefined,
           is_active: true,
         };
-        await databaseService.createPackage(input);
+        const result = await databaseService.createPackage(input);
+        
+        // Check if package was reactivated (has an older created_at timestamp)
+        const timeSinceCreation = Date.now() - new Date(result.created_at).getTime();
+        const wasReactivated = timeSinceCreation > 5000; // Created more than 5 seconds ago = reactivated
+        
+        Alert.alert('Success', wasReactivated ? 'Package reactivated' : 'Package created');
       }
 
-      Alert.alert('Success', editingPackage ? 'Package updated' : 'Package created');
       setPackageModalVisible(false);
       loadData();
     } catch (error) {
@@ -210,9 +217,9 @@ export default function SettingsScreen() {
     setCategoryModalVisible(true);
   };
 
-  const handleEditCategory = (category: string) => {
+  const handleEditCategory = (category: ExpenseCategory) => {
     setEditingCategory(category);
-    setCategoryName(category);
+    setCategoryName(category.name);
     setCategoryModalVisible(true);
   };
 
@@ -222,32 +229,46 @@ export default function SettingsScreen() {
       return;
     }
 
-    let updatedCategories: string[];
-    if (editingCategory) {
-      updatedCategories = categories.map(c => c === editingCategory ? categoryName.trim() : c);
-    } else {
-      if (categories.includes(categoryName.trim())) {
-        Alert.alert('Error', 'Category already exists');
-        return;
-      }
-      updatedCategories = [...categories, categoryName.trim()];
-    }
-
     try {
-      await databaseService.updateAppSettings({ expense_categories: updatedCategories });
-      setCategories(updatedCategories);
-      setCategoryModalVisible(false);
-      Alert.alert('Success', editingCategory ? 'Category updated' : 'Category added');
-    } catch (error) {
+      if (editingCategory) {
+        // Update existing category
+        await databaseService.updateExpenseCategory(editingCategory.id, { name: categoryName.trim() });
+        Alert.alert('Success', 'Category updated');
+      } else {
+        // Create new category (or reactivate soft-deleted one)
+        const beforeCreate = Date.now();
+        const newCategory = await databaseService.createExpenseCategory({ name: categoryName.trim() });
+        const afterCreate = Date.now();
+        
+        // If created very quickly (< 10ms), it was likely reactivated
+        const wasReactivated = (afterCreate - beforeCreate) < 10;
+        
+        if (wasReactivated) {
+          Alert.alert('Category Reactivated', `The category "${categoryName.trim()}" was previously deleted and has been reactivated.`);
+        } else {
+          Alert.alert('Success', 'Category added');
+        }
+      }
+      
+      // Reload categories
+      await loadData();
+     setCategoryModalVisible(false);
+    } catch (error: any) {
       console.error('Error saving category:', error);
-      Alert.alert('Error', 'Failed to save category');
+      
+      // Check if it's a unique constraint error
+      if (error.message?.includes('UNIQUE') || error.message?.includes('unique')) {
+        Alert.alert('Error', 'A category with this name already exists');
+      } else {
+        Alert.alert('Error', 'Failed to save category');
+      }
     }
   };
 
-  const handleDeleteCategory = (category: string) => {
+  const handleDeleteCategory = (category: ExpenseCategory) => {
     Alert.alert(
       'Delete Category',
-      `Are you sure you want to delete "${category}"?`,
+      `Are you sure you want to delete "${category.name}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -255,9 +276,8 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const updatedCategories = categories.filter(c => c !== category);
-              await databaseService.updateAppSettings({ expense_categories: updatedCategories });
-              setCategories(updatedCategories);
+              await databaseService.deleteExpenseCategory(category.id);
+              await loadData();
               Alert.alert('Success', 'Category deleted');
             } catch (error) {
               console.error('Error deleting category:', error);
@@ -392,12 +412,12 @@ export default function SettingsScreen() {
                 <Ionicons name="add-circle" size={isTablet ? 28 : 24} color="#2563eb" />
               </TouchableOpacity>
             </View>
-            {categories.map((category, index) => (
-              <View key={index} style={[styles.settingItem, isTablet && styles.tabletSettingItem]}>
+            {categories.map((category) => (
+              <View key={category.id} style={[styles.settingItem, isTablet && styles.tabletSettingItem]}>
                 <View style={styles.settingItemLeft}>
                   <Ionicons name="pricetag" size={isTablet ? 24 : 20} color="#2563eb" />
                   <Text style={[styles.settingItemText, isTablet && styles.tabletSettingItemText]}>
-                    {category}
+                    {category.name}
                   </Text>
                 </View>
                 <View style={styles.itemActions}>

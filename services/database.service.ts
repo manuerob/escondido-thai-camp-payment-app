@@ -6,6 +6,7 @@ import type {
   Subscription,
   Payment,
   Expense,
+  ExpenseCategory,
   Todo,
   ScheduleBlock,
   Participation,
@@ -20,6 +21,8 @@ import type {
   UpdatePaymentInput,
   CreateExpenseInput,
   UpdateExpenseInput,
+  CreateExpenseCategoryInput,
+  UpdateExpenseCategoryInput,
   CreateTodoInput,
   UpdateTodoInput,
   CreateScheduleBlockInput,
@@ -434,7 +437,6 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS app_settings (
         id INTEGER PRIMARY KEY CHECK(id = 1),
         currency TEXT NOT NULL DEFAULT 'USD',
-        expense_categories TEXT NOT NULL DEFAULT '["Equipment","Utilities","Rent","Supplies","Maintenance","Marketing","Staff","Other"]',
         enabled_payment_methods TEXT NOT NULL DEFAULT '["cash","card","bank_transfer","digital_wallet","other"]',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -443,6 +445,27 @@ class DatabaseService {
       
       -- Insert default settings row
       INSERT OR IGNORE INTO app_settings (id) VALUES (1);
+
+      -- Expense categories table
+      CREATE TABLE IF NOT EXISTS expense_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+        deleted_at TEXT
+      );
+
+      -- Insert default expense categories
+      INSERT OR IGNORE INTO expense_categories (name) VALUES
+        ('Equipment'),
+        ('Utilities'),
+        ('Rent'),
+        ('Supplies'),
+        ('Maintenance'),
+        ('Marketing'),
+        ('Staff'),
+        ('Other');
 
       -- Indexes
       CREATE INDEX IF NOT EXISTS idx_members_first_name ON members(first_name) WHERE deleted_at IS NULL;
@@ -454,6 +477,8 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_payments_member ON payments(member_id) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_expense_categories_sync_status ON expense_categories(sync_status) WHERE deleted_at IS NULL;
 
       -- Triggers for updated_at
       CREATE TRIGGER IF NOT EXISTS update_members_updated_at
@@ -498,15 +523,31 @@ class DatabaseService {
         UPDATE app_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
       END;
 
+      CREATE TRIGGER IF NOT EXISTS update_expense_categories_updated_at
+        AFTER UPDATE ON expense_categories FOR EACH ROW
+        WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+      BEGIN
+        UPDATE expense_categories SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
       CREATE TRIGGER IF NOT EXISTS reset_app_settings_sync_status
         AFTER UPDATE ON app_settings FOR EACH ROW
         WHEN NEW.sync_status = 'synced' AND (
           OLD.currency != NEW.currency OR
-          OLD.expense_categories != NEW.expense_categories OR
           OLD.enabled_payment_methods != NEW.enabled_payment_methods
         )
       BEGIN
         UPDATE app_settings SET sync_status = 'pending' WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS reset_expense_categories_sync_status
+        AFTER UPDATE ON expense_categories FOR EACH ROW
+        WHEN NEW.sync_status = 'synced' AND (
+          OLD.name != NEW.name OR
+          OLD.deleted_at != NEW.deleted_at
+        )
+      BEGIN
+        UPDATE expense_categories SET sync_status = 'pending' WHERE id = NEW.id;
       END;
 
       -- Todos table
@@ -748,8 +789,53 @@ class DatabaseService {
   // PACKAGES METHODS
   // ============================================
 
+  async findSoftDeletedPackage(name: string, price: number, durationDays: number): Promise<Package | null> {
+    const db = await this.getDatabase();
+    return await db.getFirstAsync<Package>(
+      `SELECT * FROM packages 
+       WHERE name = ? AND price = ? AND duration_days = ? AND deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC LIMIT 1`,
+      [name, price, durationDays]
+    );
+  }
+
+  async reactivatePackage(id: number, input: CreatePackageInput): Promise<Package> {
+    const db = await this.getDatabase();
+    
+    // Update the soft-deleted package with new values and reactivate it
+    await db.runAsync(
+      `UPDATE packages 
+       SET description = ?, sessions_included = ?, is_active = ?, deleted_at = NULL, sync_status = 'pending'
+       WHERE id = ?`,
+      [input.description || null, input.sessions_included || null, input.is_active !== false ? 1 : 0, id]
+    );
+    
+    const pkg = await db.getFirstAsync<Package>(
+      'SELECT * FROM packages WHERE id = ?',
+      [id]
+    );
+    
+    if (!pkg) throw new Error('Failed to reactivate package');
+    console.log(`Reactivated soft-deleted package: ${pkg.name} (ID: ${pkg.id})`);
+    return pkg;
+  }
+
   async createPackage(input: CreatePackageInput): Promise<Package> {
     const db = await this.getDatabase();
+    
+    // Check if a soft-deleted package with the same name, price, and duration exists
+    const softDeleted = await this.findSoftDeletedPackage(
+      input.name,
+      input.price,
+      input.duration_days
+    );
+    
+    if (softDeleted) {
+      // Reactivate the soft-deleted package instead of creating a new one
+      return await this.reactivatePackage(softDeleted.id, input);
+    }
+    
+    // No soft-deleted package found, create a new one
     const result = await db.runAsync(
       `INSERT INTO packages (name, description, price, duration_days, sessions_included, is_active)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -2055,11 +2141,6 @@ class DatabaseService {
       values.push(input.currency);
     }
 
-    if (input.expense_categories !== undefined) {
-      updates.push('expense_categories = ?');
-      values.push(JSON.stringify(input.expense_categories));
-    }
-
     if (input.enabled_payment_methods !== undefined) {
       updates.push('enabled_payment_methods = ?');
       values.push(JSON.stringify(input.enabled_payment_methods));
@@ -2084,10 +2165,6 @@ class DatabaseService {
     const db = await this.getDatabase();
 
     // Parse JSON fields if they're strings
-    const expenseCategories = typeof remoteSettings.expense_categories === 'string' 
-      ? remoteSettings.expense_categories 
-      : JSON.stringify(remoteSettings.expense_categories);
-    
     const enabledPaymentMethods = typeof remoteSettings.enabled_payment_methods === 'string'
       ? remoteSettings.enabled_payment_methods
       : JSON.stringify(remoteSettings.enabled_payment_methods);
@@ -2098,11 +2175,10 @@ class DatabaseService {
     if (!localSettings) {
       // Insert new settings
       await db.runAsync(
-        `INSERT INTO app_settings (id, currency, expense_categories, enabled_payment_methods, created_at, updated_at, sync_status)
-         VALUES (1, ?, ?, ?, ?, ?, 'synced')`,
+        `INSERT INTO app_settings (id, currency, enabled_payment_methods, created_at, updated_at, sync_status)
+         VALUES (1, ?, ?, ?, ?, 'synced')`,
         [
           remoteSettings.currency,
-          expenseCategories,
           enabledPaymentMethods,
           remoteSettings.created_at,
           remoteSettings.updated_at
@@ -2128,11 +2204,10 @@ class DatabaseService {
       console.log('Remote app_settings is newer, updating local');
       await db.runAsync(
         `UPDATE app_settings 
-         SET currency = ?, expense_categories = ?, enabled_payment_methods = ?, updated_at = ?, sync_status = 'synced'
+         SET currency = ?, enabled_payment_methods = ?, updated_at = ?, sync_status = 'synced'
          WHERE id = 1`,
         [
           remoteSettings.currency,
-          expenseCategories,
           enabledPaymentMethods,
           remoteSettings.updated_at
         ]
@@ -2164,6 +2239,105 @@ class DatabaseService {
     const db = await this.getDatabase();
     await db.runAsync(
       `UPDATE app_settings SET sync_status = 'synced' WHERE id = 1 AND sync_status = 'pending'`
+    );
+  }
+
+  // ============================================
+  // EXPENSE CATEGORIES METHODS
+  // ============================================
+
+  async findSoftDeletedExpenseCategory(name: string): Promise<ExpenseCategory | null> {
+    const db = await this.getDatabase();
+    return await db.getFirstAsync<ExpenseCategory>(
+      `SELECT * FROM expense_categories 
+       WHERE name = ? AND deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC LIMIT 1`,
+      [name]
+    );
+  }
+
+  async reactivateExpenseCategory(id: number): Promise<ExpenseCategory> {
+    const db = await this.getDatabase();
+    
+    // Reactivate the soft-deleted category
+    await db.runAsync(
+      `UPDATE expense_categories 
+       SET deleted_at = NULL, sync_status = 'pending'
+       WHERE id = ?`,
+      [id]
+    );
+    
+    const category = await db.getFirstAsync<ExpenseCategory>(
+      'SELECT * FROM expense_categories WHERE id = ?',
+      [id]
+    );
+    
+    if (!category) throw new Error('Failed to reactivate expense category');
+    console.log(`Reactivated soft-deleted expense category: ${category.name} (ID: ${category.id})`);
+    return category;
+  }
+
+  async createExpenseCategory(input: CreateExpenseCategoryInput): Promise<ExpenseCategory> {
+    const db = await this.getDatabase();
+    
+    // Check if a soft-deleted category with the same name exists
+    const softDeleted = await this.findSoftDeletedExpenseCategory(input.name);
+    
+    if (softDeleted) {
+      // Reactivate the soft-deleted category instead of creating a new one
+      return await this.reactivateExpenseCategory(softDeleted.id);
+    }
+    
+    // No soft-deleted category found, create a new one
+    const result = await db.runAsync(
+      `INSERT INTO expense_categories (name) VALUES (?)`,
+      [input.name]
+    );
+    
+    const category = await db.getFirstAsync<ExpenseCategory>(
+      'SELECT * FROM expense_categories WHERE id = ?',
+      [result.lastInsertRowId]
+    );
+    
+    if (!category) throw new Error('Failed to create expense category');
+    return category;
+  }
+
+  async getAllExpenseCategories(includeDeleted = false): Promise<ExpenseCategory[]> {
+    const db = await this.getDatabase();
+    const query = includeDeleted
+      ? 'SELECT * FROM expense_categories ORDER BY name ASC'
+      : 'SELECT * FROM expense_categories WHERE deleted_at IS NULL ORDER BY name ASC';
+    
+    return await db.getAllAsync<ExpenseCategory>(query);
+  }
+
+  async updateExpenseCategory(id: number, input: UpdateExpenseCategoryInput): Promise<ExpenseCategory> {
+    const db = await this.getDatabase();
+    
+    if (input.name === undefined) {
+      throw new Error('No fields to update');
+    }
+
+    await db.runAsync(
+      `UPDATE expense_categories SET name = ?, sync_status = ? WHERE id = ?`,
+      [input.name, 'pending', id]
+    );
+
+    const category = await db.getFirstAsync<ExpenseCategory>(
+      'SELECT * FROM expense_categories WHERE id = ?',
+      [id]
+    );
+    
+    if (!category) throw new Error('Expense category not found');
+    return category;
+  }
+
+  async deleteExpenseCategory(id: number): Promise<void> {
+    const db = await this.getDatabase();
+    await db.runAsync(
+      'UPDATE expense_categories SET deleted_at = CURRENT_TIMESTAMP, sync_status = ? WHERE id = ?',
+      ['pending', id]
     );
   }
 

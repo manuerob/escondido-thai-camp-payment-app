@@ -57,13 +57,14 @@ export default function ExpensesScreen() {
 
   const loadSettings = async () => {
     try {
-      // Load settings from database
+      // Load expense categories from database
+      const expenseCategories = await databaseService.getAllExpenseCategories();
+      setCategories(expenseCategories.map(c => c.name));
+
+      // Load payment methods from app_settings
       const appSettings = await databaseService.getAppSettings();
       if (appSettings) {
-        const cats = JSON.parse(appSettings.expense_categories);
         const methods = JSON.parse(appSettings.enabled_payment_methods);
-        
-        setCategories(cats);
         setPaymentMethods(methods as PaymentMethod[]);
       }
     } catch (error) {

@@ -145,12 +145,34 @@ CREATE TABLE IF NOT EXISTS participations (
 );
 
 -- ============================================
+-- EXPENSE CATEGORIES TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS expense_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+  deleted_at TEXT
+);
+
+-- Insert default categories
+INSERT OR IGNORE INTO expense_categories (name) VALUES 
+  ('Equipment'),
+  ('Utilities'),
+  ('Rent'),
+  ('Supplies'),
+  ('Maintenance'),
+  ('Marketing'),
+  ('Staff'),
+  ('Other');
+
+-- ============================================
 -- APP SETTINGS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS app_settings (
   id INTEGER PRIMARY KEY CHECK(id = 1), -- Single row table
   currency TEXT NOT NULL DEFAULT 'USD',
-  expense_categories TEXT NOT NULL DEFAULT '["Equipment","Utilities","Rent","Supplies","Maintenance","Marketing","Staff","Other"]',
   enabled_payment_methods TEXT NOT NULL DEFAULT '["cash","card","bank_transfer","digital_wallet","other"]',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -172,6 +194,10 @@ CREATE INDEX IF NOT EXISTS idx_members_deleted ON members(deleted_at);
 -- Packages indexes
 CREATE INDEX IF NOT EXISTS idx_packages_active ON packages(is_active) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_packages_sync_status ON packages(sync_status) WHERE deleted_at IS NULL;
+
+-- Expense categories indexes
+CREATE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(name) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_expense_categories_sync_status ON expense_categories(sync_status) WHERE deleted_at IS NULL;
 
 -- Subscriptions indexes
 CREATE INDEX IF NOT EXISTS idx_subscriptions_member ON subscriptions(member_id) WHERE deleted_at IS NULL;
@@ -285,6 +311,15 @@ CREATE TRIGGER IF NOT EXISTS update_app_settings_updated_at
   WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
 BEGIN
   UPDATE app_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- Expense categories trigger
+CREATE TRIGGER IF NOT EXISTS update_expense_categories_updated_at
+  AFTER UPDATE ON expense_categories
+  FOR EACH ROW
+  WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+BEGIN
+  UPDATE expense_categories SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- ============================================
@@ -413,9 +448,19 @@ CREATE TRIGGER IF NOT EXISTS reset_app_settings_sync_status
   FOR EACH ROW
   WHEN NEW.sync_status = 'synced' AND (
     OLD.currency != NEW.currency OR
-    OLD.expense_categories != NEW.expense_categories OR
     OLD.enabled_payment_methods != NEW.enabled_payment_methods
   )
 BEGIN
   UPDATE app_settings SET sync_status = 'pending' WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS reset_expense_categories_sync_status
+  AFTER UPDATE ON expense_categories
+  FOR EACH ROW
+  WHEN NEW.sync_status = 'synced' AND (
+    OLD.name != NEW.name OR
+    OLD.deleted_at != NEW.deleted_at
+  )
+BEGIN
+  UPDATE expense_categories SET sync_status = 'pending' WHERE id = NEW.id;
 END;
