@@ -382,17 +382,3 @@ CREATE TRIGGER IF NOT EXISTS reset_schedule_blocks_sync_status
 BEGIN
   UPDATE schedule_blocks SET sync_status = 'pending' WHERE id = NEW.id;
 END;
-
--- ============================================
--- DEFAULT SEED DATA
--- ============================================
-
--- Insert default packages (only if not already seeded)
-INSERT OR IGNORE INTO packages (id, name, description, price, duration_days, sessions_included, is_active)
-VALUES 
-  (1, 'Single Entry', 'One-time gym entry', 150, 0, 1, 1),
-  (2, 'Week Pass', '7-day unlimited access', 800, 7, NULL, 1),
-  (3, 'Monthly Pass', '30-day unlimited access', 2500, 30, NULL, 1);
-
--- Mark packages as seeded
-INSERT OR REPLACE INTO app_metadata (key, value) VALUES ('packages_seeded', 'true');

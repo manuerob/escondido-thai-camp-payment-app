@@ -186,18 +186,6 @@ ALTER TABLE payments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses DISABLE ROW LEVEL SECURITY;
 
 -- ============================================
--- DEFAULT SEED DATA
--- ============================================
-
--- Insert default packages
-INSERT INTO packages (id, name, description, price, duration_days, sessions_included, is_active)
-VALUES 
-  (1, 'Single Entry', 'One-time gym entry', 150, 1, 1, true),
-  (2, 'Week Pass', '7-day unlimited access', 800, 7, NULL, true),
-  (3, 'Monthly Pass', '30-day unlimited access', 2500, 30, NULL, true)
-ON CONFLICT (id) DO NOTHING;
-
--- ============================================
 -- COMMENTS FOR DOCUMENTATION
 -- ============================================
 

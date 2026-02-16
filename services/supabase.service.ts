@@ -1,12 +1,12 @@
 import 'react-native-url-polyfill/auto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import type { Member, Package, Subscription, Payment, Expense } from '@/types/database';
+import type { Member, Package, Subscription, Payment, Expense, Todo, ScheduleBlock, Participation } from '@/types/database';
 
 // Replace these with your actual Supabase project credentials
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
-type SyncableRecord = Member | Package | Subscription | Payment | Expense;
+type SyncableRecord = Member | Package | Subscription | Payment | Expense | Todo | ScheduleBlock | Participation;
 
 class SupabaseService {
   private client: SupabaseClient | null = null;

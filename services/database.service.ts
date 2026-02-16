@@ -63,7 +63,6 @@ class DatabaseService {
       this.db = await SQLite.openDatabaseAsync(DB_NAME);
       await this.checkAndMigrate();
       await this.createTables();
-      await this.seedDefaultData();
       console.log('Database initialized successfully');
     } catch (error) {
       this.db = null; // Reset on error
@@ -226,7 +225,6 @@ class DatabaseService {
               OLD.title != NEW.title OR
               OLD.description != NEW.description OR
               OLD.color != NEW.color OR
-              OLD.participants_count != NEW.participants_count OR
               OLD.deleted_at != NEW.deleted_at
             )
           BEGIN
@@ -245,6 +243,35 @@ class DatabaseService {
             ALTER TABLE schedule_blocks ADD COLUMN specific_date TEXT;
           `);
           console.log('✅ specific_date column added successfully');
+        }
+
+        // Fix old trigger that references non-existent participants_count column
+        const triggerCheck = await this.db.getFirstAsync<any>(
+          "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='reset_schedule_blocks_sync_status'"
+        );
+        if (triggerCheck?.sql && triggerCheck.sql.includes('participants_count')) {
+          console.log('📝 Fixing schedule_blocks trigger (removing participants_count reference)...');
+          await this.db.execAsync(`
+            DROP TRIGGER IF EXISTS reset_schedule_blocks_sync_status;
+            
+            CREATE TRIGGER reset_schedule_blocks_sync_status
+              AFTER UPDATE ON schedule_blocks
+              FOR EACH ROW
+              WHEN NEW.sync_status = 'synced' AND (
+                OLD.day_of_week != NEW.day_of_week OR
+                OLD.specific_date != NEW.specific_date OR
+                OLD.start_time != NEW.start_time OR
+                OLD.end_time != NEW.end_time OR
+                OLD.title != NEW.title OR
+                OLD.description != NEW.description OR
+                OLD.color != NEW.color OR
+                OLD.deleted_at != NEW.deleted_at
+              )
+            BEGIN
+              UPDATE schedule_blocks SET sync_status = 'pending' WHERE id = NEW.id;
+            END;
+          `);
+          console.log('✅ Schedule blocks trigger fixed successfully');
         }
       }
     } catch (error) {
@@ -447,6 +474,127 @@ class DatabaseService {
       BEGIN
         UPDATE expenses SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
       END;
+
+      -- Todos table
+      CREATE TABLE IF NOT EXISTS todos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        is_checked INTEGER NOT NULL DEFAULT 0 CHECK(is_checked IN (0, 1)),
+        completed_at TEXT,
+        is_archived INTEGER NOT NULL DEFAULT 0 CHECK(is_archived IN (0, 1)),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+        deleted_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_todos_checked ON todos(is_checked) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_todos_archived ON todos(is_archived) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_todos_sync_status ON todos(sync_status) WHERE deleted_at IS NULL;
+
+      CREATE TRIGGER IF NOT EXISTS update_todos_updated_at
+        AFTER UPDATE ON todos
+        FOR EACH ROW
+        WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+      BEGIN
+        UPDATE todos SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS reset_todos_sync_status
+        AFTER UPDATE ON todos
+        FOR EACH ROW
+        WHEN NEW.sync_status = 'synced' AND (
+          OLD.title != NEW.title OR
+          OLD.is_checked != NEW.is_checked OR
+          OLD.completed_at != NEW.completed_at OR
+          OLD.is_archived != NEW.is_archived OR
+          OLD.deleted_at != NEW.deleted_at
+        )
+      BEGIN
+        UPDATE todos SET sync_status = 'pending' WHERE id = NEW.id;
+      END;
+
+      -- Schedule blocks table
+      CREATE TABLE IF NOT EXISTS schedule_blocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day_of_week INTEGER NOT NULL CHECK(day_of_week >= 0 AND day_of_week <= 6),
+        specific_date TEXT,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        color TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+        deleted_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_schedule_blocks_day ON schedule_blocks(day_of_week) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_schedule_blocks_time ON schedule_blocks(day_of_week, start_time) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_schedule_blocks_sync_status ON schedule_blocks(sync_status) WHERE deleted_at IS NULL;
+
+      CREATE TRIGGER IF NOT EXISTS update_schedule_blocks_updated_at
+        AFTER UPDATE ON schedule_blocks
+        FOR EACH ROW
+        WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+      BEGIN
+        UPDATE schedule_blocks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS reset_schedule_blocks_sync_status
+        AFTER UPDATE ON schedule_blocks
+        FOR EACH ROW
+        WHEN NEW.sync_status = 'synced' AND (
+          OLD.day_of_week != NEW.day_of_week OR
+          OLD.specific_date != NEW.specific_date OR
+          OLD.start_time != NEW.start_time OR
+          OLD.end_time != NEW.end_time OR
+          OLD.title != NEW.title OR
+          OLD.description != NEW.description OR
+          OLD.color != NEW.color OR
+          OLD.deleted_at != NEW.deleted_at
+        )
+      BEGIN
+        UPDATE schedule_blocks SET sync_status = 'pending' WHERE id = NEW.id;
+      END;
+
+      -- Participations table
+      CREATE TABLE IF NOT EXISTS participations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_block_id INTEGER NOT NULL,
+        participation_date TEXT NOT NULL,
+        participants_count INTEGER NOT NULL DEFAULT 0 CHECK(participants_count >= 0),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
+        deleted_at TEXT,
+        FOREIGN KEY (schedule_block_id) REFERENCES schedule_blocks(id) ON DELETE CASCADE,
+        UNIQUE(schedule_block_id, participation_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_participations_block_id ON participations(schedule_block_id) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_participations_date ON participations(participation_date) WHERE deleted_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_participations_sync_status ON participations(sync_status) WHERE deleted_at IS NULL;
+
+      CREATE TRIGGER IF NOT EXISTS update_participations_updated_at
+        AFTER UPDATE ON participations
+        FOR EACH ROW
+        WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+      BEGIN
+        UPDATE participations SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS reset_participations_sync_status
+        AFTER UPDATE ON participations
+        FOR EACH ROW
+        WHEN NEW.sync_status = 'synced' AND (
+          OLD.participants_count != NEW.participants_count OR
+          OLD.deleted_at != NEW.deleted_at
+        )
+      BEGIN
+        UPDATE participations SET sync_status = 'pending' WHERE id = NEW.id;
+      END;
     `);
   }
 
@@ -455,65 +603,6 @@ class DatabaseService {
       await this.init();
     }
     return this.db!;
-  }
-
-  // ============================================
-  // SEED DEFAULT DATA
-  // ============================================
-
-  private async seedDefaultData(): Promise<void> {
-    const db = await this.getDatabase();
-    
-    // Check if seeding has already been done
-    const seeded = await db.getFirstAsync<{ value: string }>(
-      'SELECT value FROM app_metadata WHERE key = ?',
-      ['packages_seeded']
-    );
-
-    if (seeded?.value === 'true') {
-      console.log('Default packages already seeded');
-      return;
-    }
-
-    console.log('Seeding default packages...');
-
-    // Seed default packages
-    const defaultPackages: CreatePackageInput[] = [
-      {
-        name: 'Single Entry',
-        description: 'One-time gym entry',
-        price: 150,
-        duration_days: 1, // Valid for 1 day
-        sessions_included: 1,
-        is_active: true,
-      },
-      {
-        name: 'Week Pass',
-        description: '7-day unlimited access',
-        price: 800,
-        duration_days: 7,
-        is_active: true,
-      },
-      {
-        name: 'Monthly Pass',
-        description: '30-day unlimited access',
-        price: 2500,
-        duration_days: 30,
-        is_active: true,
-      },
-    ];
-
-    for (const pkg of defaultPackages) {
-      await this.createPackage(pkg);
-    }
-
-    // Mark seeding as complete
-    await db.runAsync(
-      'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)',
-      ['packages_seeded', 'true']
-    );
-
-    console.log('Default packages seeded successfully');
   }
 
   // ============================================
@@ -1156,7 +1245,7 @@ class DatabaseService {
     `);
 
     const query = includeArchived
-      ? `SELECT * FROM todos WHERE deleted_at IS NULL ORDER BY created_at DESC`
+      ? `SELECT * FROM todos WHERE is_archived = 1 AND deleted_at IS NULL ORDER BY created_at DESC`
       : `SELECT * FROM todos WHERE is_archived = 0 AND deleted_at IS NULL ORDER BY is_checked ASC, created_at DESC`;
 
     const rows = await db.getAllAsync<any>(query);
@@ -1727,9 +1816,42 @@ class DatabaseService {
 
   async getAllPendingRecordsIncludingDeleted<T = any>(table: string): Promise<T[]> {
     const db = await this.getDatabase();
-    return await db.getAllAsync<T>(
-      `SELECT * FROM ${table} WHERE sync_status = 'pending'`
-    );
+    
+    // For tables with foreign keys, filter out records that reference deleted/non-existent entities
+    if (table === 'subscriptions') {
+      // Only sync subscriptions that have valid member_id and package_id
+      return await db.getAllAsync<T>(
+        `SELECT s.* FROM ${table} s
+         INNER JOIN members m ON s.member_id = m.id
+         INNER JOIN packages p ON s.package_id = p.id
+         WHERE s.sync_status = 'pending'
+         AND m.deleted_at IS NULL
+         AND p.deleted_at IS NULL`
+      );
+    } else if (table === 'payments') {
+      // Only sync payments that have valid member_id and (no subscription OR valid subscription_id)
+      return await db.getAllAsync<T>(
+        `SELECT pay.* FROM ${table} pay
+         INNER JOIN members m ON pay.member_id = m.id
+         LEFT JOIN subscriptions s ON pay.subscription_id = s.id
+         WHERE pay.sync_status = 'pending'
+         AND m.deleted_at IS NULL
+         AND (pay.subscription_id IS NULL OR s.deleted_at IS NULL)`
+      );
+    } else if (table === 'participations') {
+      // Only sync participations that have valid schedule_block_id
+      return await db.getAllAsync<T>(
+        `SELECT p.* FROM ${table} p
+         INNER JOIN schedule_blocks sb ON p.schedule_block_id = sb.id
+         WHERE p.sync_status = 'pending'
+         AND sb.deleted_at IS NULL`
+      );
+    } else {
+      // For other tables, just get all pending records
+      return await db.getAllAsync<T>(
+        `SELECT * FROM ${table} WHERE sync_status = 'pending'`
+      );
+    }
   }
 
   async markAsSynced(table: string, id: number): Promise<void> {
@@ -1857,7 +1979,6 @@ class DatabaseService {
     `);
     
     await this.createTables();
-    await this.seedDefaultData();
     console.log('Database reset successfully');
   }
 

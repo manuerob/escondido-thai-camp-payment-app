@@ -191,6 +191,17 @@ export default function ExpensesScreen() {
     return method.replace('_', ' ').replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
+  const getPaymentMethodIcon = (method: PaymentMethod): string => {
+    const icons: Record<PaymentMethod, string> = {
+      'cash': 'cash-outline',
+      'card': 'card-outline',
+      'bank_transfer': 'business-outline',
+      'digital_wallet': 'phone-portrait-outline',
+      'other': 'ellipsis-horizontal-circle-outline',
+    };
+    return icons[method] || 'ellipsis-horizontal-circle-outline';
+  };
+
 
 
   const formatDate = (dateString: string): string => {
@@ -233,11 +244,6 @@ export default function ExpensesScreen() {
                 {note}
               </Text>
             )}
-            {item.vendor && (
-              <Text style={[styles.vendor, isTablet && styles.tabletVendor]}>
-                {item.vendor}
-              </Text>
-            )}
           </View>
         <View
           style={[
@@ -253,16 +259,25 @@ export default function ExpensesScreen() {
 
       <View style={styles.expenseDetails}>
         <View style={styles.detailRow}>
-          <Ionicons name="cash-outline" size={isTablet ? 20 : 18} color="#1f2937" />
-          <Text style={[styles.amount, isTablet && styles.tabletAmount]}>
-            {formatCurrency(item.amount)}
+          <Ionicons name="calendar-outline" size={isTablet ? 20 : 18} color="#6b7280" />
+          <Text style={[styles.date, isTablet && styles.tabletDate]}>
+            {formatDate(item.expense_date)}
           </Text>
         </View>
 
         <View style={styles.detailRow}>
-          <Ionicons name="calendar-outline" size={isTablet ? 20 : 18} color="#6b7280" />
-          <Text style={[styles.date, isTablet && styles.tabletDate]}>
-            {formatDate(item.expense_date)}
+          {item.vendor && (
+            <Text style={[styles.vendor, isTablet && styles.tabletVendor]}>
+              {item.vendor}
+            </Text>
+          )}
+          <Ionicons 
+            name={getPaymentMethodIcon(item.payment_method) as any} 
+            size={isTablet ? 20 : 18} 
+            color="#6b7280" 
+          />
+          <Text style={[styles.amount, isTablet && styles.tabletAmount]}>
+            {formatCurrency(item.amount)}
           </Text>
         </View>
       </View>
@@ -784,7 +799,7 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   amount: {
     fontSize: 16,

@@ -93,6 +93,10 @@ class SyncService {
         console.log(`✅ Sync completed: ${result.recordsPushed} pushed, ${result.recordsPulled} pulled`);
       } else {
         console.log('⚠️ Sync completed with errors');
+        console.log('Errors:');
+        result.errors.forEach((error, index) => {
+          console.log(`  ${index + 1}. ${error}`);
+        });
       }
 
       this.lastSyncResult = result;
