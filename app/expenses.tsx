@@ -15,7 +15,6 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -58,30 +57,14 @@ export default function ExpensesScreen() {
 
   const loadSettings = async () => {
     try {
-      const savedCategories = await AsyncStorage.getItem('expense_categories');
-      if (savedCategories) {
-        const cats = JSON.parse(savedCategories);
-        // Filter out any invalid values
-        const validCategories = cats.filter((c: any) => typeof c === 'string' && c.trim().length > 0);
-        if (validCategories.length > 0) {
-          setCategories(validCategories);
-        }
-      }
-
-      const savedPaymentMethods = await AsyncStorage.getItem('payment_methods');
-      if (savedPaymentMethods) {
-        const methods = JSON.parse(savedPaymentMethods);
-        // Handle migration from objects to strings
-        const validMethods = methods
-          .map((m: any) => {
-            if (typeof m === 'string') return m;
-            if (typeof m === 'object' && m.id) return m.id;
-            return null;
-          })
-          .filter((m: any) => m && typeof m === 'string' && m.trim().length > 0);
-        if (validMethods.length > 0) {
-          setPaymentMethods(validMethods as PaymentMethod[]);
-        }
+      // Load settings from database
+      const appSettings = await databaseService.getAppSettings();
+      if (appSettings) {
+        const cats = JSON.parse(appSettings.expense_categories);
+        const methods = JSON.parse(appSettings.enabled_payment_methods);
+        
+        setCategories(cats);
+        setPaymentMethods(methods as PaymentMethod[]);
       }
     } catch (error) {
       console.error('Error loading settings:', error);

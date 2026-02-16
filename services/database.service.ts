@@ -9,6 +9,7 @@ import type {
   Todo,
   ScheduleBlock,
   Participation,
+  AppSettings,
   CreateMemberInput,
   UpdateMemberInput,
   CreatePackageInput,
@@ -25,6 +26,7 @@ import type {
   UpdateScheduleBlockInput,
   CreateParticipationInput,
   UpdateParticipationInput,
+  UpdateAppSettingsInput,
   PaginationParams,
   DateRangeFilter,
   MemberWithSubscription,
@@ -428,6 +430,20 @@ class DatabaseService {
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- App settings table (single row)
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        currency TEXT NOT NULL DEFAULT 'USD',
+        expense_categories TEXT NOT NULL DEFAULT '["Equipment","Utilities","Rent","Supplies","Maintenance","Marketing","Staff","Other"]',
+        enabled_payment_methods TEXT NOT NULL DEFAULT '["cash","card","bank_transfer","digital_wallet","other"]',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced'))
+      );
+      
+      -- Insert default settings row
+      INSERT OR IGNORE INTO app_settings (id) VALUES (1);
+
       -- Indexes
       CREATE INDEX IF NOT EXISTS idx_members_first_name ON members(first_name) WHERE deleted_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_members_last_name ON members(last_name) WHERE deleted_at IS NULL;
@@ -473,6 +489,24 @@ class DatabaseService {
         WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
       BEGIN
         UPDATE expenses SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS update_app_settings_updated_at
+        AFTER UPDATE ON app_settings FOR EACH ROW
+        WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+      BEGIN
+        UPDATE app_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS reset_app_settings_sync_status
+        AFTER UPDATE ON app_settings FOR EACH ROW
+        WHEN NEW.sync_status = 'synced' AND (
+          OLD.currency != NEW.currency OR
+          OLD.expense_categories != NEW.expense_categories OR
+          OLD.enabled_payment_methods != NEW.enabled_payment_methods
+        )
+      BEGIN
+        UPDATE app_settings SET sync_status = 'pending' WHERE id = NEW.id;
       END;
 
       -- Todos table
@@ -1846,8 +1880,13 @@ class DatabaseService {
          WHERE p.sync_status = 'pending'
          AND sb.deleted_at IS NULL`
       );
+    } else if (table === 'app_settings') {
+      // Single row table without deleted_at
+      return await db.getAllAsync<T>(
+        `SELECT * FROM ${table} WHERE sync_status = 'pending'`
+      );
     } else {
-      // For other tables, just get all pending records
+      // For other tables, just get all pending records (those with deleted_at support)
       return await db.getAllAsync<T>(
         `SELECT * FROM ${table} WHERE sync_status = 'pending'`
       );
@@ -1987,6 +2026,147 @@ class DatabaseService {
     );
   }
 
+  // ============================================
+  // APP SETTINGS METHODS
+  // ============================================
+
+  /**
+   * Get app settings
+   */
+  async getAppSettings(): Promise<AppSettings | null> {
+    const db = await this.getDatabase();
+    const result = await db.getFirstAsync<AppSettings>(
+      `SELECT * FROM app_settings WHERE id = 1`
+    );
+    return result || null;
+  }
+
+  /**
+   * Update app settings
+   */
+  async updateAppSettings(input: UpdateAppSettingsInput): Promise<void> {
+    const db = await this.getDatabase();
+    
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (input.currency !== undefined) {
+      updates.push('currency = ?');
+      values.push(input.currency);
+    }
+
+    if (input.expense_categories !== undefined) {
+      updates.push('expense_categories = ?');
+      values.push(JSON.stringify(input.expense_categories));
+    }
+
+    if (input.enabled_payment_methods !== undefined) {
+      updates.push('enabled_payment_methods = ?');
+      values.push(JSON.stringify(input.enabled_payment_methods));
+    }
+
+    if (updates.length === 0) return;
+
+    updates.push('sync_status = ?');
+    values.push('pending');
+    values.push(1); // id
+
+    await db.runAsync(
+      `UPDATE app_settings SET ${updates.join(', ')} WHERE id = ?`,
+      values
+    );
+  }
+
+  /**
+   * Upsert settings from remote source (Supabase)
+   */
+  async upsertSettingsFromRemote(remoteSettings: any): Promise<void> {
+    const db = await this.getDatabase();
+
+    // Parse JSON fields if they're strings
+    const expenseCategories = typeof remoteSettings.expense_categories === 'string' 
+      ? remoteSettings.expense_categories 
+      : JSON.stringify(remoteSettings.expense_categories);
+    
+    const enabledPaymentMethods = typeof remoteSettings.enabled_payment_methods === 'string'
+      ? remoteSettings.enabled_payment_methods
+      : JSON.stringify(remoteSettings.enabled_payment_methods);
+
+    // Check if local settings exist
+    const localSettings = await this.getAppSettings();
+    
+    if (!localSettings) {
+      // Insert new settings
+      await db.runAsync(
+        `INSERT INTO app_settings (id, currency, expense_categories, enabled_payment_methods, created_at, updated_at, sync_status)
+         VALUES (1, ?, ?, ?, ?, ?, 'synced')`,
+        [
+          remoteSettings.currency,
+          expenseCategories,
+          enabledPaymentMethods,
+          remoteSettings.created_at,
+          remoteSettings.updated_at
+        ]
+      );
+      return;
+    }
+
+    // Parse timestamps for comparison
+    const localTimeStr = localSettings.updated_at;
+    const remoteTimeStr = remoteSettings.updated_at;
+
+    // Parse local timestamp as UTC
+    const localTime = localTimeStr.includes('T') 
+      ? new Date(localTimeStr).getTime()
+      : new Date(localTimeStr.replace(' ', 'T') + 'Z').getTime();
+    const remoteTime = new Date(remoteTimeStr).getTime();
+
+    console.log(`Comparing app_settings: local=${localTimeStr} (${localTime}ms) vs remote=${remoteTimeStr} (${remoteTime}ms), diff=${remoteTime - localTime}ms`);
+
+    // Only update if remote is newer
+    if (remoteTime > localTime) {
+      console.log('Remote app_settings is newer, updating local');
+      await db.runAsync(
+        `UPDATE app_settings 
+         SET currency = ?, expense_categories = ?, enabled_payment_methods = ?, updated_at = ?, sync_status = 'synced'
+         WHERE id = 1`,
+        [
+          remoteSettings.currency,
+          expenseCategories,
+          enabledPaymentMethods,
+          remoteSettings.updated_at
+        ]
+      );
+    } else {
+      console.log('Local app_settings is up to date or newer, marking as synced');
+      // Just mark as synced without changing updated_at
+      await db.runAsync(
+        `UPDATE app_settings SET sync_status = 'synced' WHERE id = 1 AND sync_status != 'synced'`
+      );
+    }
+  }
+
+  /**
+   * Get pending settings changes
+   */
+  async getPendingSettings(): Promise<AppSettings | null> {
+    const db = await this.getDatabase();
+    const result = await db.getFirstAsync<AppSettings>(
+      `SELECT * FROM app_settings WHERE id = 1 AND sync_status = 'pending'`
+    );
+    return result || null;
+  }
+
+  /**
+   * Mark settings as synced
+   */
+  async markSettingsAsSynced(): Promise<void> {
+    const db = await this.getDatabase();
+    await db.runAsync(
+      `UPDATE app_settings SET sync_status = 'synced' WHERE id = 1 AND sync_status = 'pending'`
+    );
+  }
+
 
   // ============================================
   // UTILITY METHODS
@@ -2004,6 +2184,7 @@ class DatabaseService {
       DROP TABLE IF EXISTS todos;
       DROP TABLE IF EXISTS schedule_blocks;
       DROP TABLE IF EXISTS participations;
+      DROP TABLE IF EXISTS app_settings;
       DROP TABLE IF EXISTS app_metadata;
     `);
     

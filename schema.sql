@@ -145,6 +145,22 @@ CREATE TABLE IF NOT EXISTS participations (
 );
 
 -- ============================================
+-- APP SETTINGS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS app_settings (
+  id INTEGER PRIMARY KEY CHECK(id = 1), -- Single row table
+  currency TEXT NOT NULL DEFAULT 'USD',
+  expense_categories TEXT NOT NULL DEFAULT '["Equipment","Utilities","Rent","Supplies","Maintenance","Marketing","Staff","Other"]',
+  enabled_payment_methods TEXT NOT NULL DEFAULT '["cash","card","bank_transfer","digital_wallet","other"]',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced'))
+);
+
+-- Insert default settings row
+INSERT OR IGNORE INTO app_settings (id) VALUES (1);
+
+-- ============================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================
 
@@ -260,6 +276,15 @@ CREATE TRIGGER IF NOT EXISTS update_schedule_blocks_updated_at
   WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
 BEGIN
   UPDATE schedule_blocks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+-- App settings trigger
+CREATE TRIGGER IF NOT EXISTS update_app_settings_updated_at
+  AFTER UPDATE ON app_settings
+  FOR EACH ROW
+  WHEN OLD.updated_at = NEW.updated_at OR OLD.updated_at IS NULL
+BEGIN
+  UPDATE app_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
 
 -- ============================================
@@ -381,4 +406,16 @@ CREATE TRIGGER IF NOT EXISTS reset_schedule_blocks_sync_status
   )
 BEGIN
   UPDATE schedule_blocks SET sync_status = 'pending' WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS reset_app_settings_sync_status
+  AFTER UPDATE ON app_settings
+  FOR EACH ROW
+  WHEN NEW.sync_status = 'synced' AND (
+    OLD.currency != NEW.currency OR
+    OLD.expense_categories != NEW.expense_categories OR
+    OLD.enabled_payment_methods != NEW.enabled_payment_methods
+  )
+BEGIN
+  UPDATE app_settings SET sync_status = 'pending' WHERE id = NEW.id;
 END;

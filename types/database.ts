@@ -313,6 +313,26 @@ export interface MemberWithSubscription extends Member {
 }
 
 // ============================================
+// APP SETTINGS INTERFACE
+// ============================================
+
+export interface AppSettings {
+  id: number; // Always 1 (single row table)
+  currency: string;
+  expense_categories: string; // JSON array stored as string in SQLite
+  enabled_payment_methods: string; // JSON array stored as string in SQLite
+  created_at: string;
+  updated_at: string;
+  sync_status: SyncStatus;
+}
+
+export interface UpdateAppSettingsInput {
+  currency?: string;
+  expense_categories?: string[];
+  enabled_payment_methods?: PaymentMethod[];
+}
+
+// ============================================
 // UTILITY TYPES
 // ============================================
 

@@ -23,7 +23,6 @@ import { databaseService } from '../services/database.service';
 import { useCurrency } from '../hooks';
 import type { MemberWithSubscription, SubscriptionStatus, Package, PaymentMethod, PaymentStatus } from '../types/database';
 
-const PAYMENT_METHODS: PaymentMethod[] = ['cash', 'card', 'bank_transfer', 'digital_wallet'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending'];
 
 type StatusFilterType = 'all' | 'active' | 'expired' | 'expires_soon' | 'pending_payment';
@@ -42,6 +41,7 @@ export default function MembersScreen() {
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all');
   const [packageFilter, setPackageFilter] = useState<string>('all');
   const [availablePackages, setAvailablePackages] = useState<string[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(['cash', 'card', 'bank_transfer', 'digital_wallet', 'other']);
   const [refreshing, setRefreshing] = useState(false);
 
   // Modal state
@@ -63,9 +63,23 @@ export default function MembersScreen() {
   const [saving, setSaving] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
 
+  const loadSettings = async () => {
+    try {
+      // Load payment methods from database
+      const appSettings = await databaseService.getAppSettings();
+      if (appSettings) {
+        const methods = JSON.parse(appSettings.enabled_payment_methods);
+        setPaymentMethods(methods as PaymentMethod[]);
+      }
+    } catch (error) {
+      console.error('Error loading payment methods:', error);
+    }
+  };
+
   // Load members when screen comes into focus or filter/search changes
   useFocusEffect(
     React.useCallback(() => {
+      loadSettings();
       if (searchQuery.trim()) {
         searchMembers();
       } else {
@@ -773,7 +787,7 @@ export default function MembersScreen() {
               <View style={styles.formSection}>
                 <Text style={[styles.label, isTablet && styles.tabletLabel]}>Payment Method</Text>
                 <View style={styles.paymentMethodGrid}>
-                  {PAYMENT_METHODS.map((method) => (
+                  {paymentMethods.map((method) => (
                     <TouchableOpacity
                       key={method}
                       style={[

@@ -12,13 +12,13 @@ import {
   useWindowDimensions,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import type { Package, CreatePackageInput, UpdatePackageInput } from '../types/database';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CURRENCIES = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -45,6 +45,7 @@ const DEFAULT_PAYMENT_METHODS = [
   { id: 'card', label: 'Card', icon: 'card-outline' },
   { id: 'bank_transfer', label: 'Bank Transfer', icon: 'business-outline' },
   { id: 'digital_wallet', label: 'Digital Wallet', icon: 'phone-portrait-outline' },
+  { id: 'other', label: 'Other', icon: 'ellipsis-horizontal-circle-outline' },
 ];
 
 export default function SettingsScreen() {
@@ -54,7 +55,7 @@ export default function SettingsScreen() {
   // State
   const [packages, setPackages] = useState<Package[]>([]);
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
-  const [paymentMethods, setPaymentMethods] = useState(DEFAULT_PAYMENT_METHODS);
+  const [enabledPaymentMethods, setEnabledPaymentMethods] = useState<string[]>(DEFAULT_PAYMENT_METHODS.map(m => m.id)); // Store enabled method IDs
   const [currency, setCurrency] = useState('USD');
   const [loading, setLoading] = useState(true);
 
@@ -72,13 +73,6 @@ export default function SettingsScreen() {
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [categoryName, setCategoryName] = useState('');
-
-  // Payment method modal state
-  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
-  const [editingPaymentMethod, setEditingPaymentMethod] = useState<any>(null);
-  const [paymentMethodId, setPaymentMethodId] = useState('');
-  const [paymentMethodLabel, setPaymentMethodLabel] = useState('');
-  const [paymentMethodIcon, setPaymentMethodIcon] = useState('');
 
   // Currency modal state
   const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
@@ -98,57 +92,22 @@ export default function SettingsScreen() {
       const pkgs = await databaseService.getAllPackages();
       setPackages(pkgs);
 
-      // Load categories from AsyncStorage
-      const savedCategories = await AsyncStorage.getItem('expense_categories');
-      if (savedCategories) {
-        setCategories(JSON.parse(savedCategories));
+      // Load settings from database
+      const appSettings = await databaseService.getAppSettings();
+      
+      if (appSettings) {
+        // Parse JSON strings to arrays
+        const expenseCategories = JSON.parse(appSettings.expense_categories);
+        const enabledPaymentMethods = JSON.parse(appSettings.enabled_payment_methods);
+        
+        setCategories(expenseCategories);
+        setEnabledPaymentMethods(enabledPaymentMethods);
+        setCurrency(appSettings.currency);
       } else {
-        // Initialize with defaults on first load
-        await AsyncStorage.setItem('expense_categories', JSON.stringify(DEFAULT_CATEGORIES));
-      }
-
-      // Load payment methods from AsyncStorage
-      const savedPaymentMethods = await AsyncStorage.getItem('payment_methods');
-      if (savedPaymentMethods) {
-        const methodIds = JSON.parse(savedPaymentMethods);
-        // Handle migration from objects to strings and filter invalid values
-        const validIds = methodIds
-          .map((m: any) => {
-            if (typeof m === 'string') return m;
-            if (typeof m === 'object' && m && m.id) return m.id;
-            return null;
-          })
-          .filter((id: any) => id && typeof id === 'string' && id.trim().length > 0);
-        
-        // Convert IDs back to full objects for UI
-        const fullMethods = validIds.map((id: string) => {
-          const defaultMethod = DEFAULT_PAYMENT_METHODS.find(m => m.id === id);
-          return defaultMethod || { id, label: id.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()), icon: 'card-outline' };
-        });
-        
-        if (fullMethods.length > 0) {
-          setPaymentMethods(fullMethods);
-        }
-        
-        // Save back the cleaned IDs
-        if (validIds.length > 0) {
-          await AsyncStorage.setItem('payment_methods', JSON.stringify(validIds));
-        } else {
-          // If no valid methods, reset to defaults
-          const defaultIds = DEFAULT_PAYMENT_METHODS.map(m => m.id);
-          await AsyncStorage.setItem('payment_methods', JSON.stringify(defaultIds));
-          setPaymentMethods(DEFAULT_PAYMENT_METHODS);
-        }
-      } else {
-        // Initialize with defaults on first load
-        const defaultIds = DEFAULT_PAYMENT_METHODS.map(m => m.id);
-        await AsyncStorage.setItem('payment_methods', JSON.stringify(defaultIds));
-      }
-
-      // Load currency from AsyncStorage
-      const savedCurrency = await AsyncStorage.getItem('app_currency');
-      if (savedCurrency) {
-        setCurrency(savedCurrency);
+        // Initialize with defaults if no settings exist (shouldn't happen due to INSERT OR IGNORE)
+        setCategories(DEFAULT_CATEGORIES);
+        setEnabledPaymentMethods(DEFAULT_PAYMENT_METHODS.map(m => m.id));
+        setCurrency('USD');
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -275,7 +234,7 @@ export default function SettingsScreen() {
     }
 
     try {
-      await AsyncStorage.setItem('expense_categories', JSON.stringify(updatedCategories));
+      await databaseService.updateAppSettings({ expense_categories: updatedCategories });
       setCategories(updatedCategories);
       setCategoryModalVisible(false);
       Alert.alert('Success', editingCategory ? 'Category updated' : 'Category added');
@@ -297,7 +256,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             try {
               const updatedCategories = categories.filter(c => c !== category);
-              await AsyncStorage.setItem('expense_categories', JSON.stringify(updatedCategories));
+              await databaseService.updateAppSettings({ expense_categories: updatedCategories });
               setCategories(updatedCategories);
               Alert.alert('Success', 'Category deleted');
             } catch (error) {
@@ -311,91 +270,30 @@ export default function SettingsScreen() {
   };
 
   // Payment Method Management
-  const handleAddPaymentMethod = () => {
-    setEditingPaymentMethod(null);
-    setPaymentMethodId('');
-    setPaymentMethodLabel('');
-    setPaymentMethodIcon('card-outline');
-    setPaymentModalVisible(true);
-  };
-
-  const handleEditPaymentMethod = (method: any) => {
-    setEditingPaymentMethod(method);
-    setPaymentMethodId(method.id);
-    setPaymentMethodLabel(method.label);
-    setPaymentMethodIcon(method.icon);
-    setPaymentModalVisible(true);
-  };
-
-  const handleSavePaymentMethod = async () => {
-    if (!paymentMethodId.trim() || !paymentMethodLabel.trim()) {
-      Alert.alert('Validation Error', 'ID and label are required');
-      return;
-    }
-
-    let updatedMethods;
-    if (editingPaymentMethod) {
-      updatedMethods = paymentMethods.map(m => 
-        m.id === editingPaymentMethod.id 
-          ? { id: paymentMethodId.trim(), label: paymentMethodLabel.trim(), icon: paymentMethodIcon }
-          : m
-      );
-    } else {
-      if (paymentMethods.some(m => m.id === paymentMethodId.trim())) {
-        Alert.alert('Error', 'Payment method ID already exists');
-        return;
-      }
-      updatedMethods = [...paymentMethods, { 
-        id: paymentMethodId.trim(), 
-        label: paymentMethodLabel.trim(), 
-        icon: paymentMethodIcon 
-      }];
-    }
-
+  // Payment Method Toggle
+  const handleTogglePaymentMethod = async (methodId: string) => {
     try {
-      // Save only the IDs (strings) to match PaymentMethod type
-      const methodIds = updatedMethods.map(m => m.id);
-      await AsyncStorage.setItem('payment_methods', JSON.stringify(methodIds));
-      setPaymentMethods(updatedMethods);
-      setPaymentModalVisible(false);
-      Alert.alert('Success', editingPaymentMethod ? 'Payment method updated' : 'Payment method added');
+      let updatedEnabled;
+      if (enabledPaymentMethods.includes(methodId)) {
+        // Disable this method
+        updatedEnabled = enabledPaymentMethods.filter(id => id !== methodId);
+      } else {
+        // Enable this method
+        updatedEnabled = [...enabledPaymentMethods, methodId];
+      }
+      
+      await databaseService.updateAppSettings({ enabled_payment_methods: updatedEnabled as any });
+      setEnabledPaymentMethods(updatedEnabled);
     } catch (error) {
-      console.error('Error saving payment method:', error);
-      Alert.alert('Error', 'Failed to save payment method');
+      console.error('Error toggling payment method:', error);
+      Alert.alert('Error', 'Failed to update payment method');
     }
-  };
-
-  const handleDeletePaymentMethod = (method: any) => {
-    Alert.alert(
-      'Delete Payment Method',
-      `Are you sure you want to delete "${method.label}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const updatedMethods = paymentMethods.filter(m => m.id !== method.id);
-              // Save only the IDs (strings)
-              const methodIds = updatedMethods.map(m => m.id);
-              await AsyncStorage.setItem('payment_methods', JSON.stringify(methodIds));
-              setPaymentMethods(updatedMethods);
-              Alert.alert('Success', 'Payment method deleted');
-            } catch (error) {
-              console.error('Error deleting payment method:', error);
-              Alert.alert('Error', 'Failed to delete payment method');
-            }
-          },
-        },
-      ]
-    );
   };
 
   // Currency Management
   const handleChangeCurrency = async (currencyCode: string) => {
     try {
-      await AsyncStorage.setItem('app_currency', currencyCode);
+      await databaseService.updateAppSettings({ currency: currencyCode });
       setCurrency(currencyCode);
       setCurrencyModalVisible(false);
       Alert.alert('Success', 'Currency updated');
@@ -518,26 +416,21 @@ export default function SettingsScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle]}>Payment Methods</Text>
-              <TouchableOpacity onPress={handleAddPaymentMethod} style={styles.addButton}>
-                <Ionicons name="add-circle" size={isTablet ? 28 : 24} color="#2563eb" />
-              </TouchableOpacity>
             </View>
-            {paymentMethods.map((method, index) => (
-              <View key={index} style={[styles.settingItem, isTablet && styles.tabletSettingItem]}>
+            {DEFAULT_PAYMENT_METHODS.map((method) => (
+              <View key={method.id} style={[styles.settingItem, isTablet && styles.tabletSettingItem]}>
                 <View style={styles.settingItemLeft}>
                   <Ionicons name={method.icon as any} size={isTablet ? 24 : 20} color="#2563eb" />
                   <Text style={[styles.settingItemText, isTablet && styles.tabletSettingItemText]}>
                     {method.label}
                   </Text>
                 </View>
-                <View style={styles.itemActions}>
-                  <TouchableOpacity onPress={() => handleEditPaymentMethod(method)} style={styles.actionButton}>
-                    <Ionicons name="create-outline" size={isTablet ? 22 : 18} color="#6b7280" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleDeletePaymentMethod(method)} style={styles.actionButton}>
-                    <Ionicons name="trash-outline" size={isTablet ? 22 : 18} color="#ef4444" />
-                  </TouchableOpacity>
-                </View>
+                <Switch
+                  value={enabledPaymentMethods.includes(method.id)}
+                  onValueChange={() => handleTogglePaymentMethod(method.id)}
+                  trackColor={{ false: '#d1d5db', true: '#93c5fd' }}
+                  thumbColor={enabledPaymentMethods.includes(method.id) ? '#2563eb' : '#f3f4f6'}
+                />
               </View>
             ))}
           </View>
@@ -751,84 +644,6 @@ export default function SettingsScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Payment Method Modal */}
-      <Modal
-        visible={paymentModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setPaymentModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => setPaymentModalVisible(false)}
-          />
-          <View style={[styles.modalCard, isTablet && styles.tabletModalCard]}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setPaymentModalVisible(false)} style={styles.backButton}>
-                <Ionicons name="close" size={isTablet ? 28 : 24} color="#1f2937" />
-              </TouchableOpacity>
-              <Text style={[styles.modalTitle, isTablet && styles.tabletModalTitle]}>
-                {editingPaymentMethod ? 'Edit Payment Method' : 'Add Payment Method'}
-              </Text>
-              <View style={{ width: isTablet ? 28 : 24 }} />
-            </View>
-
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-              <View style={styles.formSection}>
-                <Text style={[styles.label, isTablet && styles.tabletLabel]}>ID (lowercase, underscore)</Text>
-                <TextInput
-                  style={[styles.input, isTablet && styles.tabletInput]}
-                  value={paymentMethodId}
-                  onChangeText={setPaymentMethodId}
-                  placeholder="e.g., cash"
-                  placeholderTextColor="#9ca3af"
-                  autoCapitalize="none"
-                  editable={!editingPaymentMethod}
-                />
-              </View>
-
-              <View style={styles.formSection}>
-                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Label</Text>
-                <TextInput
-                  style={[styles.input, isTablet && styles.tabletInput]}
-                  value={paymentMethodLabel}
-                  onChangeText={setPaymentMethodLabel}
-                  placeholder="e.g., Cash"
-                  placeholderTextColor="#9ca3af"
-                />
-              </View>
-
-              <View style={styles.formSection}>
-                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Icon Name (Ionicons)</Text>
-                <TextInput
-                  style={[styles.input, isTablet && styles.tabletInput]}
-                  value={paymentMethodIcon}
-                  onChangeText={setPaymentMethodIcon}
-                  placeholder="e.g., cash-outline"
-                  placeholderTextColor="#9ca3af"
-                  autoCapitalize="none"
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.saveButton, isTablet && styles.tabletSaveButton]}
-                onPress={handleSavePaymentMethod}
-              >
-                <Ionicons name="checkmark" size={isTablet ? 24 : 20} color="#fff" />
-                <Text style={[styles.saveButtonText, isTablet && styles.tabletSaveButtonText]}>
-                  Save Payment Method
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

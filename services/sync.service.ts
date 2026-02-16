@@ -194,15 +194,24 @@ class SyncService {
 
       console.log(`Merging ${pullResult.records.length} remote ${table}...`);
 
-      // Upsert with conflict resolution (latest updated_at wins)
-      const upsertResult = await databaseService.upsertFromRemote(table, pullResult.records);
+      // Special handling for app_settings (single-row table)
+      if (table === 'app_settings') {
+        if (pullResult.records.length > 0) {
+          await databaseService.upsertSettingsFromRemote(pullResult.records[0]);
+          result.recordsPulled += 1;
+          console.log(`✓ Synced app_settings`);
+        }
+      } else {
+        // Upsert with conflict resolution (latest updated_at wins)
+        const upsertResult = await databaseService.upsertFromRemote(table, pullResult.records);
 
-      result.recordsPulled += upsertResult.inserted + upsertResult.updated;
-      
-      console.log(
-        `✓ Pulled ${table}: ${upsertResult.inserted} inserted, ` +
-        `${upsertResult.updated} updated, ${upsertResult.skipped} skipped (local newer)`
-      );
+        result.recordsPulled += upsertResult.inserted + upsertResult.updated;
+        
+        console.log(
+          `✓ Pulled ${table}: ${upsertResult.inserted} inserted, ` +
+          `${upsertResult.updated} updated, ${upsertResult.skipped} skipped (local newer)`
+        );
+      }
 
       // Update last sync time
       await databaseService.setLastSyncTime(table, new Date().toISOString());

@@ -140,7 +140,7 @@ class SupabaseService {
    * Get all tables that need to be synced
    */
   getSyncTables(): string[] {
-    return ['members', 'packages', 'subscriptions', 'payments', 'expenses', 'todos', 'schedule_blocks', 'participations'];
+    return ['members', 'packages', 'subscriptions', 'payments', 'expenses', 'todos', 'schedule_blocks', 'participations', 'app_settings'];
   }
 }
 
