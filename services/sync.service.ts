@@ -150,11 +150,13 @@ class SyncService {
         return;
       }
 
-      // Mark successfully synced records
+      // Don't mark as synced here - let the pull phase handle it to avoid timestamp conflicts
+      // When we mark as synced locally, it triggers the updated_at trigger, making local records
+      // appear newer than they are. Instead, we'll pull these records back from Supabase in the
+      // pull phase, which will correctly sync the timestamps and mark as synced.
       if (pushResult.syncedIds.length > 0) {
-        await databaseService.markMultipleAsSynced(table, pushResult.syncedIds);
         result.recordsPushed += pushResult.syncedIds.length;
-        console.log(`✓ Pushed ${pushResult.syncedIds.length} ${table}`);
+        console.log(`✓ Pushed ${pushResult.syncedIds.length} ${table} (will be marked synced after pull)`);
       }
     } catch (error: any) {
       const errorMsg = `Error pushing ${table}: ${error.message}`;

@@ -99,18 +99,34 @@ export default function HomeScreen() {
     setParticipantCounts(prev => ({ ...prev, [blockId]: numericValue }));
   };
 
-  const handleSaveParticipation = async (blockId: number) => {
-    const count = participantCounts[blockId];
-    if (!count || count === '0') return;
+  const handleIncrementParticipants = async (blockId: number) => {
+    const currentCount = parseInt(participantCounts[blockId] || '0', 10);
+    const newCount = currentCount + 1;
+    setParticipantCounts(prev => ({ ...prev, [blockId]: newCount.toString() }));
+    await handleSaveParticipation(blockId, newCount);
+  };
+
+  const handleDecrementParticipants = async (blockId: number) => {
+    const currentCount = parseInt(participantCounts[blockId] || '0', 10);
+    if (currentCount > 0) {
+      const newCount = currentCount - 1;
+      setParticipantCounts(prev => ({ ...prev, [blockId]: newCount.toString() }));
+      await handleSaveParticipation(blockId, newCount);
+    }
+  };
+
+  const handleSaveParticipation = async (blockId: number, count?: number) => {
+    const participantCount = count !== undefined ? count : parseInt(participantCounts[blockId] || '0', 10);
+    if (participantCount === 0) return;
     
     try {
       const today = new Date().toISOString().split('T')[0];
       await databaseService.saveParticipation({
         schedule_block_id: blockId,
         participation_date: today,
-        participants_count: parseInt(count, 10),
+        participants_count: participantCount,
       });
-      console.log(`Saved ${count} participants for block ${blockId}`);
+      console.log(`Saved ${participantCount} participants for block ${blockId}`);
     } catch (error) {
       console.error('Error saving participation:', error);
       // If the block was deleted, show alert and reload schedule
@@ -293,18 +309,39 @@ export default function HomeScreen() {
                           {/* Participants Input */}
                           <View style={styles.participantsRow}>
                             <Ionicons name="people-outline" size={16} color="#6b7280" />
-                            <TextInput
-                              style={[
+                            <View style={styles.participantsControls}>
+                              <TouchableOpacity
+                                style={[
+                                  styles.participantButton,
+                                  isTablet && styles.tabletParticipantButton
+                                ]}
+                                onPress={() => handleDecrementParticipants(block.id)}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="remove" size={isTablet ? 20 : 16} color="#64748b" />
+                              </TouchableOpacity>
+                              <View style={[
                                 styles.participantsInput,
                                 isTablet && styles.tabletParticipantsInput
-                              ]}
-                              value={participantCounts[block.id] || ''}
-                              onChangeText={(value) => handleParticipantChange(block.id, value)}
-                              onBlur={() => handleSaveParticipation(block.id)}
-                              placeholder="0"
-                              keyboardType="numeric"
-                              maxLength={3}
-                            />
+                              ]}>
+                                <Text style={[
+                                  styles.participantsValue,
+                                  isTablet && styles.tabletParticipantsValue
+                                ]}>
+                                  {participantCounts[block.id] || '0'}
+                                </Text>
+                              </View>
+                              <TouchableOpacity
+                                style={[
+                                  styles.participantButton,
+                                  isTablet && styles.tabletParticipantButton
+                                ]}
+                                onPress={() => handleIncrementParticipants(block.id)}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="add" size={isTablet ? 20 : 16} color="#64748b" />
+                              </TouchableOpacity>
+                            </View>
                             <Text style={styles.participantsLabel}>participants</Text>
                           </View>
                         </View>
@@ -567,24 +604,49 @@ const styles = StyleSheet.create({
     marginTop: 10,
     gap: 8,
   },
+  participantsControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  participantButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabletParticipantButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+  },
   participantsInput: {
     borderWidth: 1,
     borderColor: '#e2e8f0',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0f172a',
     minWidth: 50,
-    textAlign: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#f8fafc',
   },
   tabletParticipantsInput: {
-    fontSize: 16,
     paddingHorizontal: 14,
     paddingVertical: 8,
     minWidth: 60,
+  },
+  participantsValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0f172a',
+  },
+  tabletParticipantsValue: {
+    fontSize: 16,
   },
   participantsLabel: {
     fontSize: 13,

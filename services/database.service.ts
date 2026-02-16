@@ -1866,11 +1866,24 @@ class DatabaseService {
     if (ids.length === 0) return;
     
     const db = await this.getDatabase();
-    const placeholders = ids.map(() => '?').join(',');
-    await db.runAsync(
-      `UPDATE ${table} SET sync_status = 'synced' WHERE id IN (${placeholders})`,
-      ids
-    );
+    
+    // Mark each record individually to preserve updated_at
+    // We need to get the current updated_at first to prevent the trigger from firing
+    for (const id of ids) {
+      const record = await db.getFirstAsync<{ updated_at: string }>(
+        `SELECT updated_at FROM ${table} WHERE id = ?`,
+        [id]
+      );
+      
+      if (record) {
+        // Explicitly set updated_at to its current value to prevent the auto-update trigger
+        // from firing and changing it to CURRENT_TIMESTAMP
+        await db.runAsync(
+          `UPDATE ${table} SET sync_status = 'synced', updated_at = ? WHERE id = ?`,
+          [record.updated_at, id]
+        );
+      }
+    }
   }
 
   /**
@@ -1899,35 +1912,51 @@ class DatabaseService {
       );
 
       if (!existing) {
-        // Insert new record
-        const columns = Object.keys(record).filter(k => k !== 'id');
+        // Insert new record (mark as synced since it came from remote)
+        const columns = Object.keys(record).filter(k => k !== 'id' && k !== 'sync_status');
         const values = columns.map(k => (record as any)[k]);
         const placeholders = columns.map(() => '?').join(',');
         
         await db.runAsync(
-          `INSERT OR IGNORE INTO ${table} (id, ${columns.join(', ')}) VALUES (?, ${placeholders})`,
+          `INSERT OR IGNORE INTO ${table} (id, ${columns.join(', ')}, sync_status) VALUES (?, ${placeholders}, 'synced')`,
           [record.id, ...values]
         );
         inserted++;
       } else {
         // Compare timestamps for conflict resolution
-        const localTime = new Date(existing.updated_at).getTime();
-        const remoteTime = new Date(record.updated_at).getTime();
+        // SQLite stores timestamps as 'YYYY-MM-DD HH:MM:SS' in UTC (no timezone marker)
+        // We need to ensure both are parsed as UTC for accurate comparison
+        const localTimeStr = existing.updated_at;
+        const remoteTimeStr = record.updated_at;
+        
+        // Parse local timestamp as UTC by adding 'Z' or converting format
+        const localTime = localTimeStr.includes('T') 
+          ? new Date(localTimeStr).getTime()
+          : new Date(localTimeStr.replace(' ', 'T') + 'Z').getTime();
+        const remoteTime = new Date(remoteTimeStr).getTime();
+
+        console.log(`Comparing ${table} #${record.id}: local=${localTimeStr} (${localTime}) vs remote=${remoteTimeStr} (${remoteTime})`);
 
         if (remoteTime > localTime) {
-          // Remote is newer, update local
-          const columns = Object.keys(record).filter(k => k !== 'id');
-          const setClause = columns.map(k => `${k} = ?`).join(', ');
+          // Remote is newer, update local (mark as synced since it came from remote)
+          const columns = Object.keys(record).filter(k => k !== 'id' && k !== 'sync_status');
+          const setClause = columns.map(k => `${k} = ?`).join(', ') + ', sync_status = ?';
           const values = columns.map(k => (record as any)[k]);
 
           await db.runAsync(
             `UPDATE ${table} SET ${setClause} WHERE id = ?`,
-            [...values, record.id]
+            [...values, 'synced', record.id]
           );
           updated++;
-        } else {
-          // Local is newer or equal, skip update
+          console.log(`  → Updated (remote is ${remoteTime - localTime}ms newer)`);
+        } else if (remoteTime === localTime) {
+          // Same timestamp, just mark as synced if it isn't already
           skipped++;
+          console.log(`  → Skipped (timestamps equal, already in sync)`);
+        } else {
+          // Local is newer, skip update
+          skipped++;
+          console.log(`  → Skipped (local is ${localTime - remoteTime}ms newer)`);
         }
       }
     }
