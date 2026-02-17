@@ -47,6 +47,8 @@ export default function MembersScreen() {
 
   // Modal state
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<MemberWithSubscription | null>(null);
   
   // Form state
   const [fullName, setFullName] = useState('');
@@ -67,6 +69,14 @@ export default function MembersScreen() {
   
   const [saving, setSaving] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
+
+  // Payment modal state
+  const [selectedPackageIdForPayment, setSelectedPackageIdForPayment] = useState<number | null>(null);
+  const [paymentMethodForModal, setPaymentMethodForModal] = useState<PaymentMethod | null>(null);
+  const [paymentStatusForModal, setPaymentStatusForModal] = useState<PaymentStatus | null>(null);
+  const [discountTypeForPayment, setDiscountTypeForPayment] = useState<DiscountType | null>(null);
+  const [discountAmountForPayment, setDiscountAmountForPayment] = useState('');
+  const [savingPayment, setSavingPayment] = useState(false);
 
   const loadSettings = async () => {
     try {
@@ -286,7 +296,11 @@ export default function MembersScreen() {
         const selectedPackage = packages.find(p => p.id === selectedPackageId);
         if (selectedPackage) {
           const startDate = new Date().toISOString();
-          const endDate = new Date(Date.now() + selectedPackage.duration_days * 24 * 60 * 60 * 1000).toISOString();
+          // Calculate end date: duration_days - 1 (since start day counts), then set to end of day
+          const endDateObj = new Date();
+          endDateObj.setDate(endDateObj.getDate() + selectedPackage.duration_days - 1);
+          endDateObj.setHours(23, 59, 59, 999);
+          const endDate = endDateObj.toISOString();
 
           const subscription = await databaseService.createSubscription({
             member_id: member.id,
@@ -364,14 +378,117 @@ export default function MembersScreen() {
 
   const handleAddPayment = (member: MemberWithSubscription) => {
     Keyboard.dismiss();
-    Alert.alert(
-      'Add Payment',
-      `Add payment for ${member.first_name} ${member.last_name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Add', onPress: () => console.log('Payment:', member.id) }
-      ]
-    );
+    setSelectedMember(member);
+    setSelectedPackageIdForPayment(null);
+    setPaymentMethodForModal(null);
+    setPaymentStatusForModal(null);
+    setDiscountTypeForPayment(null);
+    setDiscountAmountForPayment('');
+    loadPackages();
+    setIsPaymentModalVisible(true);
+  };
+
+  const handleClosePaymentModal = () => {
+    setIsPaymentModalVisible(false);
+    setSelectedMember(null);
+    setSelectedPackageIdForPayment(null);
+    setPaymentMethodForModal(null);
+    setPaymentStatusForModal(null);
+    setDiscountTypeForPayment(null);
+    setDiscountAmountForPayment('');
+  };
+
+  const handleSavePayment = async () => {
+    if (!selectedMember || !selectedPackageIdForPayment || !paymentMethodForModal || !paymentStatusForModal) {
+      Alert.alert('Missing Information', 'Please fill in all required fields.');
+      return;
+    }
+
+    try {
+      setSavingPayment(true);
+      
+      // Get package price
+      const selectedPackage = packages.find(pkg => pkg.id === selectedPackageIdForPayment);
+      if (!selectedPackage) {
+        Alert.alert('Error', 'Selected package not found.');
+        return;
+      }
+      
+      let finalAmount = selectedPackage.price;
+      
+      // Apply discount if specified
+      if (discountTypeForPayment && discountAmountForPayment) {
+        const discount = parseFloat(discountAmountForPayment);
+        if (discountTypeForPayment === '$') {
+          finalAmount = finalAmount - discount;
+        } else {
+          finalAmount = finalAmount * (1 - discount / 100);
+        }
+      }
+
+      // Get member's existing subscriptions to determine start date
+      const existingSubscriptions = await databaseService.getSubscriptionsByMember(selectedMember.id);
+      
+      // Find the latest end date among unexpired subscriptions
+      const now = new Date();
+      const futureSubscriptions = existingSubscriptions.filter(sub => {
+        const endDate = new Date(sub.end_date);
+        return endDate > now;
+      });
+      
+      let startDate: Date;
+      if (futureSubscriptions.length === 0) {
+        // No active/future subscriptions, start immediately
+        startDate = now;
+      } else {
+        // Start after the latest end date
+        const latestEndDate = futureSubscriptions.reduce((latest, sub) => {
+          const subEndDate = new Date(sub.end_date);
+          return subEndDate > latest ? subEndDate : latest;
+        }, new Date(futureSubscriptions[0].end_date));
+        
+        // Add one day to start the next day after the current subscription ends
+        startDate = new Date(latestEndDate);
+        startDate.setDate(startDate.getDate() + 1);
+      }
+      
+      // Calculate end date based on package duration
+      // duration_days - 1 (since start day counts), then set to end of day
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + selectedPackage.duration_days - 1);
+      endDate.setHours(23, 59, 59, 999);
+
+      // Create the payment
+      await databaseService.createPayment({
+        member_id: selectedMember.id,
+        amount: finalAmount,
+        payment_method: paymentMethodForModal,
+        payment_date: new Date().toISOString(),
+        status: paymentStatusForModal,
+        discount_type: discountTypeForPayment ? discountTypeForPayment : undefined,
+        discount_amount: discountAmountForPayment ? parseFloat(discountAmountForPayment) : undefined,
+      });
+
+      // Create the subscription
+      await databaseService.createSubscription({
+        member_id: selectedMember.id,
+        package_id: selectedPackageIdForPayment,
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
+        status: 'active',
+        sessions_remaining: selectedPackage.sessions_included || undefined,
+        auto_renew: false,
+      });
+
+      Alert.alert('Success', 'Payment added and subscription created successfully!');
+      handleClosePaymentModal();
+      loadMembers(); // Reload to show updated data
+    } catch (error) {
+      console.error('Error creating payment:', error);
+      Alert.alert('Error', 'Failed to add payment. Please try again.');
+    } finally {
+      setSavingPayment(false);
+    }
   };
 
   const getStatusColor = (status: SubscriptionStatus | null): string => {
@@ -863,6 +980,261 @@ export default function MembersScreen() {
                     <Ionicons name="checkmark" size={isTablet ? 24 : 20} color="#fff" />
                     <Text style={[styles.saveButtonText, isTablet && styles.tabletSaveButtonText]}>
                       Save Member
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Payment Modal */}
+      <Modal
+        visible={isPaymentModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleClosePaymentModal}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.paymentModalOverlay}
+        >
+          <TouchableOpacity 
+            style={styles.paymentModalBackdrop} 
+            activeOpacity={1}
+            onPress={handleClosePaymentModal}
+          />
+          <View style={[styles.paymentModalCard, isTablet && styles.tabletPaymentModalCard]}>
+            {/* Header */}
+            <View style={styles.paymentModalHeader}>
+              <TouchableOpacity onPress={handleClosePaymentModal} style={styles.backButton}>
+                <Ionicons name="close" size={24} color="#6b7280" />
+              </TouchableOpacity>
+              <Text style={[styles.paymentModalTitle, isTablet && styles.tabletPaymentModalTitle]}>
+                Add Payment
+              </Text>
+              <View style={{ width: 40 }} />
+            </View>
+
+            {/* Content */}
+            <ScrollView 
+              style={styles.paymentModalContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Member Info */}
+              {selectedMember && (
+                <View style={styles.formSection}>
+                  <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle]}>
+                    Member
+                  </Text>
+                  <View style={[styles.memberInfoCard, isTablet && styles.tabletMemberInfoCard]}>
+                    <Text style={[styles.memberInfoName, isTablet && styles.tabletMemberInfoName]}>
+                      {selectedMember.first_name} {selectedMember.last_name}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Package Selection */}
+              <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
+                Package <Text style={styles.required}>*</Text>
+              </Text>
+              
+              {loadingPackages ? (
+                <ActivityIndicator size="small" color="#2563eb" style={{ marginVertical: 20 }} />
+              ) : packages.length === 0 ? (
+                <Text style={styles.noPackagesText}>No packages available</Text>
+              ) : (
+                <View style={styles.packageList}>
+                  {packages.map((pkg) => (
+                    <TouchableOpacity
+                      key={pkg.id}
+                      style={[
+                        styles.packageCard,
+                        isTablet && styles.tabletPackageCard,
+                        selectedPackageIdForPayment === pkg.id && styles.packageCardSelected,
+                      ]}
+                      onPress={() => setSelectedPackageIdForPayment(selectedPackageIdForPayment === pkg.id ? null : pkg.id)}
+                    >
+                      <View style={styles.packageHeader}>
+                        <Text style={[styles.packageName, isTablet && styles.tabletPackageName]}>
+                          {pkg.name}
+                        </Text>
+                        <Text style={[styles.packagePrice, isTablet && styles.tabletPackagePrice]}>
+                          {getCurrencySymbol()}{pkg.price.toLocaleString()}
+                        </Text>
+                      </View>
+                      <Text style={[styles.packageDetails, isTablet && styles.tabletPackageDetails]}>
+                        {pkg.duration_days} days{pkg.sessions_included ? ` • ${pkg.sessions_included} sessions` : ''}
+                      </Text>
+                      {selectedPackageIdForPayment === pkg.id && (
+                        <View style={styles.selectedBadge}>
+                          <Ionicons name="checkmark-circle" size={20} color="#2563eb" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Discount */}
+              <View style={styles.formSection}>
+                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Discount</Text>
+                <View style={styles.discountRow}>
+                  <View style={styles.discountTypeSelector}>
+                    <TouchableOpacity 
+                      style={[
+                        styles.discountTypeButtonCompact,
+                        isTablet && styles.tabletDiscountTypeButtonCompact,
+                        discountTypeForPayment === '$' && styles.discountTypeButtonCompactActive,
+                      ]}
+                      onPress={() => {
+                        if (discountTypeForPayment === '$') {
+                          setDiscountTypeForPayment(null);
+                          setDiscountAmountForPayment('');
+                        } else {
+                          setDiscountTypeForPayment('$');
+                        }
+                      }}
+                    >
+                      <Text 
+                        style={[
+                          styles.discountTypeTextCompact,
+                          isTablet && styles.tabletDiscountTypeTextCompact,
+                          discountTypeForPayment === '$' && styles.discountTypeTextCompactActive,
+                        ]}
+                      >
+                        $
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                      style={[
+                        styles.discountTypeButtonCompact,
+                        isTablet && styles.tabletDiscountTypeButtonCompact,
+                        discountTypeForPayment === '%' && styles.discountTypeButtonCompactActive,
+                      ]}
+                      onPress={() => {
+                        if (discountTypeForPayment === '%') {
+                          setDiscountTypeForPayment(null);
+                          setDiscountAmountForPayment('');
+                        } else {
+                          setDiscountTypeForPayment('%');
+                        }
+                      }}
+                    >
+                      <Text 
+                        style={[
+                          styles.discountTypeTextCompact,
+                          isTablet && styles.tabletDiscountTypeTextCompact,
+                          discountTypeForPayment === '%' && styles.discountTypeTextCompactActive,
+                        ]}
+                      >
+                        %
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <TextInput
+                    style={[styles.discountInput, isTablet && styles.tabletDiscountInput]}
+                    placeholder="Amount"
+                    value={discountAmountForPayment}
+                    onChangeText={setDiscountAmountForPayment}
+                    keyboardType="decimal-pad"
+                    editable={discountTypeForPayment !== null}
+                    placeholderTextColor="#9ca3af"
+                  />
+                </View>
+              </View>
+
+              {/* Payment Method */}
+              <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
+                Payment Method <Text style={styles.required}>*</Text>
+              </Text>
+              
+              <View style={styles.formSection}>
+                <View style={styles.paymentMethodGrid}>
+                  {paymentMethods.map((method) => (
+                    <TouchableOpacity
+                      key={method}
+                      style={[
+                        styles.paymentMethodButton,
+                        isTablet && styles.tabletPaymentMethodButton,
+                        paymentMethodForModal === method && styles.paymentMethodButtonActive,
+                      ]}
+                      onPress={() => setPaymentMethodForModal(paymentMethodForModal === method ? null : method)}
+                    >
+                      <Ionicons 
+                        name={
+                          method === 'cash' ? 'cash-outline' :
+                          method === 'card' ? 'card-outline' :
+                          method === 'bank_transfer' ? 'business-outline' :
+                          method === 'digital_wallet' ? 'phone-portrait-outline' :
+                          'ellipsis-horizontal'
+                        } 
+                        size={isTablet ? 20 : 18} 
+                        color={paymentMethodForModal === method ? '#2563eb' : '#6b7280'} 
+                      />
+                      <Text style={[
+                        styles.paymentMethodText,
+                        isTablet && styles.tabletPaymentMethodText,
+                        paymentMethodForModal === method && styles.paymentMethodTextActive,
+                      ]}>
+                        {method.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Payment Status */}
+              <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
+                Payment Status <Text style={styles.required}>*</Text>
+              </Text>
+              
+              <View style={styles.formSection}>
+                <View style={styles.paymentStatusRow}>
+                  {['pending', 'completed'].map((status) => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.statusButton,
+                        isTablet && styles.tabletStatusButton,
+                        paymentStatusForModal === status && styles.statusButtonActive,
+                      ]}
+                      onPress={() => setPaymentStatusForModal(paymentStatusForModal === status ? null : status as PaymentStatus)}
+                    >
+                      <Text style={[
+                        styles.statusButtonText,
+                        isTablet && styles.tabletStatusButtonText,
+                        paymentStatusForModal === status && styles.statusButtonTextActive,
+                      ]}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Save Button */}
+              <TouchableOpacity
+                style={[
+                  styles.saveButton,
+                  isTablet && styles.tabletSaveButton,
+                  (!selectedPackageIdForPayment || !paymentMethodForModal || !paymentStatusForModal || savingPayment) && styles.saveButtonDisabled,
+                ]}
+                onPress={handleSavePayment}
+                disabled={!selectedPackageIdForPayment || !paymentMethodForModal || !paymentStatusForModal || savingPayment}
+              >
+                {savingPayment ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={20} color="#fff" />
+                    <Text style={[styles.saveButtonText, isTablet && styles.tabletSaveButtonText]}>
+                      Save Payment
                     </Text>
                   </>
                 )}
@@ -1481,6 +1853,81 @@ const styles = StyleSheet.create({
   },
   tabletSaveButtonText: {
     fontSize: 18,
+  },
+
+  // Payment Modal
+  paymentModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  paymentModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  paymentModalCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    paddingBottom: 20,
+  },
+  tabletPaymentModalCard: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '85%',
+  },
+  paymentModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  paymentModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  tabletPaymentModalTitle: {
+    fontSize: 24,
+  },
+  paymentModalContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  memberInfoCard: {
+    padding: 16,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  tabletMemberInfoCard: {
+    padding: 20,
+    borderRadius: 14,
+  },
+  memberInfoName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  tabletMemberInfoName: {
+    fontSize: 20,
+  },
+  memberInfoPackage: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  tabletMemberInfoPackage: {
+    fontSize: 16,
   },
 });
 

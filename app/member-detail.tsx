@@ -56,8 +56,12 @@ export default function MemberDetailScreen() {
 
       setMember(memberData);
       
-      // Find active subscription
-      const active = subscriptions.find(s => s.status === 'active');
+      // Find active non-expired subscription
+      const now = new Date();
+      const active = subscriptions.find(s => {
+        const endDate = new Date(s.end_date);
+        return s.status === 'active' && endDate > now;
+      });
       setCurrentSubscription(active || null);
       
       setSubscriptionHistory(subscriptions);
@@ -74,14 +78,6 @@ export default function MemberDetailScreen() {
     setRefreshing(true);
     await loadMemberData();
     setRefreshing(false);
-  };
-
-  const handleRenew = () => {
-    Alert.alert('Renew Subscription', 'Renew flow coming soon');
-  };
-
-  const handleAddPayment = () => {
-    Alert.alert('Add Payment', 'Payment flow coming soon');
   };
 
   const getDaysRemaining = (): number | null => {
@@ -271,29 +267,6 @@ export default function MemberDetailScreen() {
                   </View>
                 )}
               </View>
-
-              {/* Action Buttons */}
-              <View style={styles.actionButtons}>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.renewButton, isTablet && styles.tabletActionButton]}
-                  onPress={handleRenew}
-                >
-                  <Ionicons name="refresh" size={isTablet ? 24 : 20} color="#fff" />
-                  <Text style={[styles.actionButtonText, isTablet && styles.tabletActionButtonText]}>
-                    Renew Subscription
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.paymentButton, isTablet && styles.tabletActionButton]}
-                  onPress={handleAddPayment}
-                >
-                  <Ionicons name="card" size={isTablet ? 24 : 20} color="#fff" />
-                  <Text style={[styles.actionButtonText, isTablet && styles.tabletActionButtonText]}>
-                    Add Payment
-                  </Text>
-                </TouchableOpacity>
-              </View>
             </>
           ) : (
             <View style={styles.emptyState}>
@@ -301,13 +274,6 @@ export default function MemberDetailScreen() {
               <Text style={[styles.emptyText, isTablet && styles.tabletEmptyText]}>
                 No active subscription
               </Text>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.renewButton, { marginTop: 16 }]}
-                onPress={handleRenew}
-              >
-                <Ionicons name="add" size={20} color="#fff" />
-                <Text style={styles.actionButtonText}>Create Subscription</Text>
-              </TouchableOpacity>
             </View>
           )}
         </View>

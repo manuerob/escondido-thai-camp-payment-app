@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   RefreshControl,
-  ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,13 +17,15 @@ import { useCurrency } from '../hooks';
 import type { PaymentWithDetails, PaymentStatus, PaymentMethod } from '../types/database';
 import { FilterBar, type FilterOption, type FilterGroup } from '../components/FilterBar';
 
+const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending', 'failed', 'refunded'];
+
 type DateFilter = 'all' | 'today' | 'this_month';
 type StatusFilter = 'all' | 'completed' | 'pending' | 'failed' | 'refunded';
 
 export default function PaymentsScreen() {
   const { width } = useWindowDimensions();
   const isTablet = width >= 768;
-  const { formatCurrency } = useCurrency();
+  const { formatCurrency, getCurrencySymbol } = useCurrency();
 
   const [payments, setPayments] = useState<PaymentWithDetails[]>([]);
   const [filteredPayments, setFilteredPayments] = useState<PaymentWithDetails[]>([]);
