@@ -9,15 +9,18 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { databaseService } from '../services/database.service';
-import { useFocusEffect } from 'expo-router';
-import type { ScheduleBlock } from '../types/database';
+import { useFocusEffect, useRouter } from 'expo-router';
+import type { ScheduleBlock, MemberWithSubscription } from '../types/database';
 
 export default function HomeScreen() {
   const { width, height } = useWindowDimensions();
+  const router = useRouter();
   
   const isTablet = width >= 768;
   const [stats, setStats] = useState({
@@ -30,6 +33,9 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingSchedule, setLoadingSchedule] = useState(true);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [expiringModalVisible, setExpiringModalVisible] = useState(false);
+  const [expiringMembers, setExpiringMembers] = useState<MemberWithSubscription[]>([]);
+  const [loadingExpiringMembers, setLoadingExpiringMembers] = useState(false);
 
   // Load stats when screen comes into focus
   useFocusEffect(
@@ -49,6 +55,68 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadExpiringMembers = async () => {
+    try {
+      setLoadingExpiringMembers(true);
+      const allMembers = await databaseService.getMembersWithSubscriptions();
+      
+      // Filter for expiring soon and expired members
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const filtered = allMembers.filter(member => {
+        if (!member.subscription_end_date) return false;
+        
+        const endDate = new Date(member.subscription_end_date);
+        endDate.setHours(0, 0, 0, 0);
+        
+        const diffTime = endDate.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        // Include if expired or expires within 3 days
+        return diffDays <= 3;
+      });
+      
+      // Sort by end date (earliest first)
+      filtered.sort((a, b) => {
+        const dateA = new Date(a.subscription_end_date!);
+        const dateB = new Date(b.subscription_end_date!);
+        return dateA.getTime() - dateB.getTime();
+      });
+      
+      setExpiringMembers(filtered);
+    } catch (error) {
+      console.error('Error loading expiring members:', error);
+      Alert.alert('Error', 'Failed to load expiring members');
+    } finally {
+      setLoadingExpiringMembers(false);
+    }
+  };
+
+  const handleExpiringTilePress = () => {
+    loadExpiringMembers();
+    setExpiringModalVisible(true);
+  };
+
+  const getDaysRemaining = (endDate: string | null): number | null => {
+    if (!endDate) return null;
+    const end = new Date(endDate);
+    const today = new Date();
+    end.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    const diffTime = end.getTime() - today.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
   };
 
   const loadTodaysSchedule = async () => {
@@ -221,11 +289,15 @@ export default function HomeScreen() {
               </View>
 
               {/* Expiring Soon Card */}
-              <View style={[
-                styles.statCard,
-                isTablet && styles.tabletStatCard,
-                stats.expiringSoonCount > 0 && styles.statCardWarning
-              ]}>
+              <TouchableOpacity
+                style={[
+                  styles.statCard,
+                  isTablet && styles.tabletStatCard,
+                  stats.expiringSoonCount > 0 && styles.statCardWarning
+                ]}
+                onPress={handleExpiringTilePress}
+                activeOpacity={0.7}
+              >
                 <View style={styles.statIconContainer}>
                   <Ionicons 
                     name="alert-circle" 
@@ -246,7 +318,7 @@ export default function HomeScreen() {
                 ]}>
                   Expiring Soon
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -435,6 +507,114 @@ export default function HomeScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Expiring Members Modal */}
+      <Modal
+        visible={expiringModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setExpiringModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, isTablet && styles.tabletModalContent]}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleContainer}>
+                <Ionicons name="alert-circle" size={isTablet ? 28 : 24} color="#ea580c" />
+                <Text style={[styles.modalTitle, isTablet && styles.tabletModalTitle]}>
+                  Expiring & Expired Members
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setExpiringModalVisible(false)}
+                style={styles.modalCloseButton}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={isTablet ? 28 : 24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Content */}
+            {loadingExpiringMembers ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator size="large" color="#2563eb" />
+              </View>
+            ) : expiringMembers.length === 0 ? (
+              <View style={styles.modalEmpty}>
+                <Ionicons name="checkmark-circle" size={isTablet ? 56 : 48} color="#10b981" />
+                <Text style={[styles.modalEmptyText, isTablet && styles.tabletModalEmptyText]}>
+                  No members expiring soon
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={expiringMembers}
+                keyExtractor={(item) => item.id.toString()}
+                contentContainerStyle={styles.modalList}
+                renderItem={({ item }) => {
+                  const daysRemaining = getDaysRemaining(item.subscription_end_date);
+                  const isExpired = daysRemaining !== null && daysRemaining < 0;
+                  const isExpiresToday = daysRemaining === 0;
+                  
+                  return (
+                    <TouchableOpacity
+                      style={[styles.memberItem, isTablet && styles.tabletMemberItem]}
+                      onPress={() => {
+                        setExpiringModalVisible(false);
+                        router.push(`/member-detail?id=${item.id}&returnTo=home`);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.memberItemContent}>
+                        <View style={styles.memberItemInfo}>
+                          <Text style={[styles.memberItemName, isTablet && styles.tabletMemberItemName]}>
+                            {item.first_name} {item.last_name}
+                          </Text>
+                          {item.package_name && (
+                            <Text style={[styles.memberItemPackage, isTablet && styles.tabletMemberItemPackage]}>
+                              {item.package_name}
+                            </Text>
+                          )}
+                          {item.subscription_end_date && (
+                            <Text style={[styles.memberItemDate, isTablet && styles.tabletMemberItemDate]}>
+                              End: {formatDate(item.subscription_end_date)}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={styles.memberItemStatus}>
+                          {isExpired ? (
+                            <View style={[styles.statusBadgeExpired, isTablet && styles.tabletStatusBadge]}>
+                              <Ionicons name="close-circle" size={isTablet ? 18 : 16} color="#fff" />
+                              <Text style={[styles.statusBadgeText, isTablet && styles.tabletStatusBadgeText]}>
+                                Expired
+                              </Text>
+                            </View>
+                          ) : isExpiresToday ? (
+                            <View style={[styles.statusBadgeToday, isTablet && styles.tabletStatusBadge]}>
+                              <Ionicons name="alert-circle" size={isTablet ? 18 : 16} color="#fff" />
+                              <Text style={[styles.statusBadgeText, isTablet && styles.tabletStatusBadgeText]}>
+                                Today
+                              </Text>
+                            </View>
+                          ) : (
+                            <View style={[styles.statusBadgeExpiring, isTablet && styles.tabletStatusBadge]}>
+                              <Ionicons name="time" size={isTablet ? 18 : 16} color="#fff" />
+                              <Text style={[styles.statusBadgeText, isTablet && styles.tabletStatusBadgeText]}>
+                                {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      <Ionicons name="chevron-forward" size={isTablet ? 22 : 20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -767,5 +947,157 @@ const styles = StyleSheet.create({
   },
   tabletSyncText: {
     fontSize: 16,
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '85%',
+    paddingBottom: 20,
+  },
+  tabletModalContent: {
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  modalTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  tabletModalTitle: {
+    fontSize: 24,
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalLoading: {
+    padding: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmpty: {
+    padding: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalEmptyText: {
+    fontSize: 16,
+    color: '#9ca3af',
+    marginTop: 16,
+  },
+  tabletModalEmptyText: {
+    fontSize: 18,
+  },
+  modalList: {
+    padding: 16,
+    gap: 12,
+  },
+  memberItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+  },
+  tabletMemberItem: {
+    padding: 18,
+    borderRadius: 16,
+  },
+  memberItemContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  memberItemInfo: {
+    flex: 1,
+  },
+  memberItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  tabletMemberItemName: {
+    fontSize: 18,
+  },
+  memberItemPackage: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 2,
+  },
+  tabletMemberItemPackage: {
+    fontSize: 15,
+  },
+  memberItemDate: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  tabletMemberItemDate: {
+    fontSize: 14,
+  },
+  memberItemStatus: {
+    alignItems: 'flex-end',
+  },
+  statusBadgeExpired: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusBadgeExpiring: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusBadgeToday: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ea580c',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  tabletStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  tabletStatusBadgeText: {
+    fontSize: 14,
   },
 });

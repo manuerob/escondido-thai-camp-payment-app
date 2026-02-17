@@ -370,6 +370,50 @@ class DatabaseService {
     } catch (error) {
       console.log('No payments discount migration needed');
     }
+
+    // Migrate app_settings to remove expense_categories column if it exists
+    try {
+      const appSettingsTableInfo = await this.db.getFirstAsync<any>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='app_settings'"
+      );
+      
+      if (appSettingsTableInfo?.sql && appSettingsTableInfo.sql.includes('expense_categories')) {
+        console.log('📝 Migrating app_settings table to remove expense_categories column...');
+        
+        // Save existing data
+        const existingSettings = await this.db.getFirstAsync<any>(
+          "SELECT currency, enabled_payment_methods FROM app_settings WHERE id = 1"
+        );
+        
+        // Drop and recreate table without expense_categories
+        await this.db.execAsync(`
+          DROP TABLE IF EXISTS app_settings;
+          
+          CREATE TABLE app_settings (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            currency TEXT NOT NULL DEFAULT 'USD',
+            enabled_payment_methods TEXT NOT NULL DEFAULT '["cash","card","bank_transfer","digital_wallet","other"]',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced'))
+          );
+        `);
+        
+        // Restore data if it existed
+        if (existingSettings) {
+          await this.db.runAsync(
+            `INSERT INTO app_settings (id, currency, enabled_payment_methods) VALUES (1, ?, ?)`,
+            [existingSettings.currency, existingSettings.enabled_payment_methods]
+          );
+        } else {
+          await this.db.runAsync(`INSERT INTO app_settings (id) VALUES (1)`);
+        }
+        
+        console.log('✅ app_settings table migrated successfully');
+      }
+    } catch (error) {
+      console.log('No app_settings migration needed');
+    }
   }
 
   private async createTables(): Promise<void> {
@@ -1000,6 +1044,10 @@ class DatabaseService {
 
   async getSubscriptionById(id: number): Promise<Subscription | null> {
     const db = await this.getDatabase();
+    
+    // Auto-update expired subscriptions
+    await this.updateExpiredSubscriptions();
+    
     return await db.getFirstAsync<Subscription>(
       'SELECT * FROM subscriptions WHERE id = ? AND deleted_at IS NULL',
       [id]
@@ -1008,6 +1056,10 @@ class DatabaseService {
 
   async getSubscriptionsByMember(memberId: number): Promise<Subscription[]> {
     const db = await this.getDatabase();
+    
+    // Auto-update expired subscriptions
+    await this.updateExpiredSubscriptions();
+    
     return await db.getAllAsync<Subscription>(
       `SELECT s.*, p.name as package_name, p.price as package_price
        FROM subscriptions s
@@ -1018,8 +1070,25 @@ class DatabaseService {
     );
   }
 
+  async updateExpiredSubscriptions(): Promise<void> {
+    const db = await this.getDatabase();
+    const now = new Date().toISOString().split('T')[0]; // Current date in YYYY-MM-DD format
+    
+    // Update subscriptions where end_date has passed and status is still 'active'
+    await db.runAsync(
+      `UPDATE subscriptions 
+       SET status = 'expired', sync_status = 'pending'
+       WHERE end_date < ? AND status = 'active' AND deleted_at IS NULL`,
+      [now]
+    );
+  }
+
   async getActiveSubscriptions(): Promise<Subscription[]> {
     const db = await this.getDatabase();
+    
+    // Auto-update expired subscriptions
+    await this.updateExpiredSubscriptions();
+    
     return await db.getAllAsync<Subscription>(
       `SELECT * FROM subscriptions 
        WHERE status = 'active' AND deleted_at IS NULL 
@@ -1915,6 +1984,9 @@ class DatabaseService {
   async getMembersWithSubscriptions(filter?: 'active' | 'expired' | 'all'): Promise<MemberWithSubscription[]> {
     const db = await this.getDatabase();
     
+    // Auto-update expired subscriptions
+    await this.updateExpiredSubscriptions();
+    
     let statusFilter = '';
     if (filter === 'active') {
       statusFilter = "AND s.status = 'active'";
@@ -1951,6 +2023,9 @@ class DatabaseService {
 
   async searchMembers(query: string, filter?: 'active' | 'expired' | 'all'): Promise<MemberWithSubscription[]> {
     const db = await this.getDatabase();
+    
+    // Auto-update expired subscriptions
+    await this.updateExpiredSubscriptions();
     
     let statusFilter = '';
     if (filter === 'active') {

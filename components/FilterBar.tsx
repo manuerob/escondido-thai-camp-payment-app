@@ -66,6 +66,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
+          style={[styles.scrollViewContainer, isTablet && styles.tabletScrollViewContainer]}
         >
           {filters.map((filterGroup, groupIndex) => {
             const activeOption = getActiveOption(filterGroup);
@@ -228,14 +229,25 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     backgroundColor: '#fff',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
+    gap: 8,
   },
   tabletContainer: {
     paddingVertical: 14,
+    flexWrap: 'nowrap',
+  },
+  scrollViewContainer: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  tabletScrollViewContainer: {
+    flexGrow: 1,
+    flexShrink: 0,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -245,16 +257,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginLeft: 12,
-    marginRight: 12,
+    marginRight: 4,
     gap: 8,
-    minWidth: 280,
-    maxWidth: 380,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 120,
+    maxWidth: 280,
+    flexBasis: 'auto',
   },
   tabletSearchContainer: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    minWidth: 350,
+    minWidth: 280,
     maxWidth: 450,
+    marginRight: 12,
+    flexGrow: 0,
+    flexBasis: 'auto',
   },
   searchInput: {
     flex: 1,

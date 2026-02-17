@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -104,6 +105,31 @@ export default function PaymentsScreen() {
     setRefreshing(true);
     await loadPayments();
     setRefreshing(false);
+  };
+
+  const handleMarkAsCompleted = async (paymentId: number, memberName: string) => {
+    Alert.alert(
+      'Confirm Payment',
+      `Mark payment from ${memberName} as completed?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Complete',
+          onPress: async () => {
+            try {
+              await databaseService.updatePayment(paymentId, { status: 'completed' });
+              await loadPayments();
+            } catch (error) {
+              console.error('Error updating payment:', error);
+              Alert.alert('Error', 'Failed to update payment status');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const formatDate = (dateString: string): string => {
@@ -235,6 +261,19 @@ export default function PaymentsScreen() {
           </View>
         </View>
       </View>
+
+      {/* Mark as Completed Button for Pending Payments */}
+      {item.status === 'pending' && (
+        <TouchableOpacity
+          style={[styles.completeButton, isTablet && styles.tabletCompleteButton]}
+          onPress={() => handleMarkAsCompleted(item.id, item.member_name)}
+        >
+          <Ionicons name="checkmark-circle-outline" size={isTablet ? 22 : 20} color="#10b981" />
+          <Text style={[styles.completeButtonText, isTablet && styles.tabletCompleteButtonText]}>
+            Mark as Completed
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -463,6 +502,35 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   tabletDetailText: {
+    fontSize: 17,
+  },
+
+  // Complete Button
+  completeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    gap: 8,
+  },
+  tabletCompleteButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginTop: 16,
+    borderRadius: 10,
+  },
+  completeButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10b981',
+  },
+  tabletCompleteButtonText: {
     fontSize: 17,
   },
 

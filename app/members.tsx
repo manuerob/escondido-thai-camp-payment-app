@@ -26,7 +26,7 @@ import { FilterBar, type FilterOption, type FilterGroup } from '../components/Fi
 
 const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending'];
 
-type StatusFilterType = 'all' | 'active' | 'expired' | 'expires_soon' | 'pending_payment';
+type StatusFilterType = 'all' | 'active' | 'expired' | 'expires_soon' | 'expired_and_expires_soon' | 'pending_payment';
 
 export default function MembersScreen() {
   const { width } = useWindowDimensions();
@@ -175,6 +175,8 @@ export default function MembersScreen() {
             return member.subscription_status === 'expired' || (daysRemaining !== null && daysRemaining <= 0);
           case 'expires_soon':
             return daysRemaining !== null && daysRemaining > 0 && daysRemaining <= 3;
+          case 'expired_and_expires_soon':
+            return (member.subscription_status === 'expired' || (daysRemaining !== null && daysRemaining <= 0)) || (daysRemaining !== null && daysRemaining > 0 && daysRemaining <= 3);
           case 'pending_payment':
             // For now, we'll show members with pending payment status if available
             // This would need backend support to properly detect pending payments
@@ -545,7 +547,7 @@ export default function MembersScreen() {
         style={[styles.memberCard, isTablet && styles.tabletMemberCard]}
         onPress={() => {
           Keyboard.dismiss();
-          router.push(`/member-detail?id=${item.id}`);
+          router.push(`/member-detail?id=${item.id}&returnTo=members`);
         }}
         activeOpacity={0.7}
       >
@@ -605,6 +607,7 @@ export default function MembersScreen() {
           { value: 'active', label: 'Active', icon: 'checkmark-circle', color: '#10b981' },
           { value: 'expired', label: 'Expired', icon: 'close-circle', color: '#ef4444' },
           { value: 'expires_soon', label: 'Expires Soon', icon: 'alert-circle', color: '#f59e0b' },
+          { value: 'expired_and_expires_soon', label: 'Expired & Expires Soon', icon: 'warning', color: '#ea580c' },
         ];
 
         const packageFilterOptions: FilterOption[] = [

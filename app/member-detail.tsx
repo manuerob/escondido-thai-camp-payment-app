@@ -22,6 +22,7 @@ export default function MemberDetailScreen() {
   const isTablet = width >= 768;
   const router = useRouter();
   const params = useLocalSearchParams();  const { formatCurrency } = useCurrency();  const memberId = Number(params.id);
+  const returnTo = params.returnTo as string || 'members';
 
   const [member, setMember] = useState<Member | null>(null);
   const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(null);
@@ -49,20 +50,26 @@ export default function MemberDetailScreen() {
 
       if (!memberData) {
         Alert.alert('Error', 'Member not found', [
-          { text: 'OK', onPress: () => router.back() }
+          { text: 'OK', onPress: () => handleBackNavigation() }
         ]);
         return;
       }
 
       setMember(memberData);
       
-      // Find active non-expired subscription
+      // Find subscription that includes today's date (date-wise current)
       const now = new Date();
-      const active = subscriptions.find(s => {
+      now.setHours(0, 0, 0, 0); // Reset time to start of day for accurate comparison
+      
+      const currentSub = subscriptions.find(s => {
+        const startDate = new Date(s.start_date);
         const endDate = new Date(s.end_date);
-        return s.status === 'active' && endDate > now;
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999); // End of day
+        return startDate <= now && endDate >= now;
       });
-      setCurrentSubscription(active || null);
+      
+      setCurrentSubscription(currentSub || null);
       
       setSubscriptionHistory(subscriptions);
       setPaymentHistory(payments);
@@ -71,6 +78,14 @@ export default function MemberDetailScreen() {
       Alert.alert('Error', 'Failed to load member details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBackNavigation = () => {
+    if (returnTo === 'home') {
+      router.push('/');
+    } else {
+      router.push('/members');
     }
   };
 
@@ -129,7 +144,7 @@ export default function MemberDetailScreen() {
       
       {/* Header */}
       <View style={[styles.header, isTablet && styles.tabletHeader]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBackNavigation} style={styles.backButton}>
           <Ionicons name="arrow-back" size={isTablet ? 28 : 24} color="#1f2937" />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, isTablet && styles.tabletHeaderTitle]}>
@@ -292,14 +307,6 @@ export default function MemberDetailScreen() {
               {subscriptionHistory.map((sub) => (
                 <View key={sub.id} style={[styles.historyItem, isTablet && styles.tabletHistoryItem]}>
                   <View style={styles.historyItemHeader}>
-                    <View style={[
-                      styles.historyStatusBadge,
-                      { backgroundColor: getStatusColor(sub.status) }
-                    ]}>
-                      <Text style={styles.historyStatusText}>
-                        {sub.status}
-                      </Text>
-                    </View>
                     <Text style={[styles.historyDate, isTablet && styles.tabletHistoryDate]}>
                       {formatDate(sub.created_at)}
                     </Text>
