@@ -138,9 +138,31 @@ class SupabaseService {
 
   /**
    * Get all tables that need to be synced
+   * Order is CRITICAL - tables must be synced in dependency order:
+   * 1. Independent tables (no foreign keys)
+   * 2. Tables with foreign keys to independent tables
+   * 3. Tables with foreign keys to dependent tables
    */
   getSyncTables(): string[] {
-    return ['members', 'packages', 'subscriptions', 'payments', 'expenses', 'expense_categories', 'todos', 'schedule_blocks', 'participations', 'app_settings'];
+    return [
+      // Independent tables - no foreign key dependencies
+      'members',
+      'packages',
+      'expense_categories',
+      'todos',
+      'schedule_blocks',
+      
+      // First level dependencies
+      'subscriptions',       // depends on: members, packages
+      'expenses',           // depends on: expense_categories (optional FK)
+      'participations',     // depends on: schedule_blocks
+      
+      // Second level dependencies
+      'payments',           // depends on: members, subscriptions
+      
+      // Settings (can be last)
+      'app_settings',
+    ];
   }
 }
 

@@ -21,7 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { databaseService } from '../services/database.service';
 import { useCurrency } from '../hooks';
-import type { MemberWithSubscription, SubscriptionStatus, Package, PaymentMethod, PaymentStatus } from '../types/database';
+import type { MemberWithSubscription, SubscriptionStatus, Package, PaymentMethod, PaymentStatus, DiscountType } from '../types/database';
 import { FilterBar, type FilterOption, type FilterGroup } from '../components/FilterBar';
 
 const PAYMENT_STATUSES: PaymentStatus[] = ['completed', 'pending'];
@@ -55,11 +55,15 @@ export default function MembersScreen() {
   const [instagram, setInstagram] = useState('');
   const [showContactDetails, setShowContactDetails] = useState(false);
   
+  // Discount state
+  const [discountType, setDiscountType] = useState<DiscountType | null>(null);
+  const [discountAmount, setDiscountAmount] = useState('');
+  
   // Package/payment state
   const [packages, setPackages] = useState<Package[]>([]);
   const [selectedPackageId, setSelectedPackageId] = useState<number | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('completed');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
   
   const [saving, setSaving] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
@@ -77,24 +81,30 @@ export default function MembersScreen() {
     }
   };
 
-  // Load members when screen comes into focus or filter/search changes
+  // Load members when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      // Reset filters and search unless locked
-      if (!filtersLocked) {
-        setStatusFilter('all');
-        setPackageFilter('all');
-        setSearchQuery('');
-      }
-      
       loadSettings();
-      if (searchQuery.trim()) {
-        searchMembers();
-      } else {
-        loadMembers();
-      }
-    }, [searchQuery, filtersLocked])
+      loadMembers();
+    }, [])
   );
+
+  // Search members when search query changes
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      searchMembers();
+    } else {
+      loadMembers();
+    }
+  }, [searchQuery]);
+
+  // Reset filters when unlocking (only if not locked)
+  useEffect(() => {
+    if (!filtersLocked) {
+      setStatusFilter('all');
+      setPackageFilter('all');
+    }
+  }, [filtersLocked]);
 
   // Apply filters whenever members or filters change
   useEffect(() => {
@@ -201,9 +211,11 @@ export default function MembersScreen() {
     setEmail('');
     setInstagram('');
     setShowContactDetails(false);
+    setDiscountType(null);
+    setDiscountAmount('');
     setSelectedPackageId(null);
-    setPaymentMethod('cash');
-    setPaymentStatus('completed');
+    setPaymentMethod(null);
+    setPaymentStatus(null);
     
     // Load packages and show modal
     loadPackages();
@@ -226,6 +238,35 @@ export default function MembersScreen() {
     const firstName = parts[0];
     const lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
 
+    // Validate discount amount if provided
+    const parsedDiscountAmount = discountAmount.trim() ? parseFloat(discountAmount.trim()) : undefined;
+    if (parsedDiscountAmount !== undefined) {
+      if (isNaN(parsedDiscountAmount) || parsedDiscountAmount < 0) {
+        Alert.alert('Validation Error', 'Discount amount must be a positive number');
+        return;
+      }
+      if (!discountType) {
+        Alert.alert('Validation Error', 'Please select a discount type ($ or %)');
+        return;
+      }
+      if (discountType === '%' && parsedDiscountAmount > 100) {
+        Alert.alert('Validation Error', 'Percentage discount cannot exceed 100%');
+        return;
+      }
+    }
+
+    // Validate payment details if package is selected
+    if (selectedPackageId) {
+      if (!paymentMethod) {
+        Alert.alert('Validation Error', 'Please select a payment method for the package');
+        return;
+      }
+      if (!paymentStatus) {
+        Alert.alert('Validation Error', 'Please select a payment status for the package');
+        return;
+      }
+    }
+
     try {
       setSaving(true);
 
@@ -236,6 +277,8 @@ export default function MembersScreen() {
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
         instagram: instagram.trim() || undefined,
+        discount_type: parsedDiscountAmount !== undefined && discountType ? discountType : undefined,
+        discount_amount: parsedDiscountAmount,
       });
 
       // 2. Create subscription if package selected
@@ -255,15 +298,34 @@ export default function MembersScreen() {
             auto_renew: false,
           });
 
-          // 3. Create payment record
-          await databaseService.createPayment({
-            member_id: member.id,
-            subscription_id: subscription.id,
-            amount: selectedPackage.price,
-            payment_date: new Date().toISOString(),
-            payment_method: paymentMethod,
-            status: paymentStatus,
-          });
+          // 3. Create payment record with discount (only if payment details provided)
+          if (paymentMethod && paymentStatus) {
+            let finalAmount = selectedPackage.price;
+            let appliedDiscountAmount: number | undefined = undefined;
+            
+            if (parsedDiscountAmount !== undefined && parsedDiscountAmount > 0) {
+              if (discountType === '$') {
+                finalAmount = Math.max(0, selectedPackage.price - parsedDiscountAmount);
+                appliedDiscountAmount = parsedDiscountAmount;
+              } else {
+                // Percentage discount
+                const discountValue = (selectedPackage.price * parsedDiscountAmount) / 100;
+                finalAmount = Math.max(0, selectedPackage.price - discountValue);
+                appliedDiscountAmount = parsedDiscountAmount;
+              }
+            }
+
+            await databaseService.createPayment({
+              member_id: member.id,
+              subscription_id: subscription.id,
+              amount: finalAmount,
+              payment_date: new Date().toISOString(),
+              payment_method: paymentMethod as PaymentMethod,
+              status: paymentStatus as PaymentStatus,
+              discount_type: appliedDiscountAmount !== undefined && discountType ? discountType : undefined,
+              discount_amount: appliedDiscountAmount,
+            });
+          }
         }
       }
 
@@ -661,6 +723,59 @@ export default function MembersScreen() {
                 </View>
               )}
 
+              {/* Discount Section */}
+              <View style={styles.formSection}>
+                <Text style={[styles.label, isTablet && styles.tabletLabel]}>Discount</Text>
+                <View style={styles.discountRow}>
+                  <View style={styles.discountTypeSelector}>
+                    <TouchableOpacity
+                      style={[
+                        styles.discountTypeButtonCompact,
+                        isTablet && styles.tabletDiscountTypeButtonCompact,
+                        discountType === '$' && styles.discountTypeButtonCompactActive,
+                      ]}
+                      onPress={() => setDiscountType(discountType === '$' ? null : '$')}
+                    >
+                      <Text
+                        style={[
+                          styles.discountTypeTextCompact,
+                          isTablet && styles.tabletDiscountTypeTextCompact,
+                          discountType === '$' && styles.discountTypeTextCompactActive,
+                        ]}
+                      >
+                        $
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.discountTypeButtonCompact,
+                        isTablet && styles.tabletDiscountTypeButtonCompact,
+                        discountType === '%' && styles.discountTypeButtonCompactActive,
+                      ]}
+                      onPress={() => setDiscountType(discountType === '%' ? null : '%')}
+                    >
+                      <Text
+                        style={[
+                          styles.discountTypeTextCompact,
+                          isTablet && styles.tabletDiscountTypeTextCompact,
+                          discountType === '%' && styles.discountTypeTextCompactActive,
+                        ]}
+                      >
+                        %
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    style={[styles.discountInput, isTablet && styles.tabletDiscountInput]}
+                    placeholder={discountType === '%' ? 'e.g., 10' : discountType === '$' ? 'e.g., 50' : 'Enter amount'}
+                    placeholderTextColor="#9ca3af"
+                    value={discountAmount}
+                    onChangeText={setDiscountAmount}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
               {/* Payment Details */}
               <Text style={[styles.sectionTitle, isTablet && styles.tabletSectionTitle, { marginTop: 24 }]}>
                 Payment Details
@@ -677,7 +792,7 @@ export default function MembersScreen() {
                         isTablet && styles.tabletPaymentMethodButton,
                         paymentMethod === method && styles.paymentMethodButtonActive,
                       ]}
-                      onPress={() => setPaymentMethod(method)}
+                      onPress={() => setPaymentMethod(paymentMethod === method ? null : method)}
                     >
                       <Ionicons
                         name={
@@ -714,7 +829,7 @@ export default function MembersScreen() {
                         isTablet && styles.tabletStatusButton,
                         paymentStatus === status && styles.statusButtonActive,
                       ]}
-                      onPress={() => setPaymentStatus(status)}
+                      onPress={() => setPaymentStatus(paymentStatus === status ? null : status)}
                     >
                       <Text
                         style={[
@@ -1242,6 +1357,100 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   statusButtonTextActive: {
+    color: '#2563eb',
+    fontWeight: '600',
+  },
+
+  // Discount Controls (Compact Inline)
+  discountRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  discountTypeSelector: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  discountTypeButtonCompact: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+  },
+  tabletDiscountTypeButtonCompact: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+  },
+  discountTypeButtonCompactActive: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#2563eb',
+  },
+  discountTypeTextCompact: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  tabletDiscountTypeTextCompact: {
+    fontSize: 18,
+  },
+  discountTypeTextCompactActive: {
+    color: '#2563eb',
+  },
+  discountInput: {
+    width: 120,
+    height: 44,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#1f2937',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  tabletDiscountInput: {
+    width: 140,
+    height: 52,
+    fontSize: 18,
+    borderRadius: 14,
+  },
+
+  // Discount Type Selection (Old - can be removed)
+  discountTypeRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  discountTypeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    alignItems: 'center',
+  },
+  tabletDiscountTypeButton: {
+    paddingVertical: 14,
+    borderRadius: 14,
+  },
+  discountTypeButtonActive: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#2563eb',
+  },
+  discountTypeText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6b7280',
+  },
+  tabletDiscountTypeText: {
+    fontSize: 16,
+  },
+  discountTypeTextActive: {
     color: '#2563eb',
     fontWeight: '600',
   },

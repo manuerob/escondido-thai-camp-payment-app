@@ -216,14 +216,22 @@ export default function PaymentsScreen() {
         </View>
 
         <View style={styles.detailRow}>
-          <Ionicons 
+
+          <View style={styles.amountContainer}>
+            {item.discount_amount && item.discount_amount > 0 && (
+              <Text style={[styles.discountBadge, isTablet && styles.tabletDiscountBadge]}>
+                -{item.discount_amount}{item.discount_type}
+              </Text>
+            )}
+                      <Ionicons 
             name={getPaymentMethodIcon(item.payment_method) as any} 
             size={isTablet ? 20 : 18} 
             color="#6b7280" 
           />
-          <Text style={[styles.amount, isTablet && styles.tabletAmount]}>
-            {formatCurrency(item.amount)}
-          </Text>
+            <Text style={[styles.amount, isTablet && styles.tabletAmount]}>
+              {formatCurrency(item.amount)}
+            </Text>
+          </View>
         </View>
       </View>
     </View>
@@ -422,6 +430,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  amountContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   amount: {
     fontSize: 18,
     fontWeight: '700',
@@ -429,6 +442,20 @@ const styles = StyleSheet.create({
   },
   tabletAmount: {
     fontSize: 22,
+  },
+  discountBadge: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#10b981',
+    backgroundColor: '#d1fae5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  tabletDiscountBadge: {
+    fontSize: 15,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
   detailText: {
     fontSize: 15,

@@ -8,6 +8,7 @@ export type SyncStatus = 'pending' | 'synced';
 export type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'digital_wallet' | 'other';
 export type PaymentStatus = 'pending' | 'completed' | 'failed' | 'refunded';
 export type SubscriptionStatus = 'active' | 'expired' | 'cancelled';
+export type DiscountType = '$' | '%';
 
 // ============================================
 // BASE INTERFACE
@@ -34,6 +35,8 @@ export interface Member extends BaseEntity {
   address: string | null;
   emergency_contact: string | null;
   notes: string | null;
+  discount_type: DiscountType | null;
+  discount_amount: number | null;
 }
 
 export interface CreateMemberInput {
@@ -45,6 +48,8 @@ export interface CreateMemberInput {
   address?: string;
   emergency_contact?: string;
   notes?: string;
+  discount_type?: DiscountType;
+  discount_amount?: number;
 }
 
 export interface UpdateMemberInput {
@@ -56,6 +61,8 @@ export interface UpdateMemberInput {
   address?: string;
   emergency_contact?: string;
   notes?: string;
+  discount_type?: DiscountType;
+  discount_amount?: number;
 }
 
 // ============================================
@@ -141,6 +148,8 @@ export interface Payment extends BaseEntity {
   transaction_ref: string | null;
   status: PaymentStatus;
   notes: string | null;
+  discount_type: DiscountType | null;
+  discount_amount: number | null;
 }
 
 export interface CreatePaymentInput {
@@ -152,6 +161,8 @@ export interface CreatePaymentInput {
   transaction_ref?: string;
   status?: PaymentStatus;
   notes?: string;
+  discount_type?: DiscountType;
+  discount_amount?: number;
 }
 
 export interface UpdatePaymentInput {

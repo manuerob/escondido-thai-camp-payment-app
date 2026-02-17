@@ -334,6 +334,42 @@ class DatabaseService {
     } catch (error) {
       console.log('No participations migration needed');
     }
+
+    // Check and add discount columns to members table (additive migration)
+    try {
+      const membersTableInfo = await this.db.getFirstAsync<any>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='members'"
+      );
+      
+      if (membersTableInfo?.sql && !membersTableInfo.sql.includes('discount_type')) {
+        console.log('📝 Adding discount columns to members table...');
+        await this.db.execAsync(`
+          ALTER TABLE members ADD COLUMN discount_type TEXT CHECK(discount_type IN ('$', '%'));
+          ALTER TABLE members ADD COLUMN discount_amount REAL CHECK(discount_amount >= 0);
+        `);
+        console.log('✅ Discount columns added to members table');
+      }
+    } catch (error) {
+      console.log('No members discount migration needed');
+    }
+
+    // Check and add discount columns to payments table (additive migration)
+    try {
+      const paymentsTableInfo = await this.db.getFirstAsync<any>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='payments'"
+      );
+      
+      if (paymentsTableInfo?.sql && !paymentsTableInfo.sql.includes('discount_type')) {
+        console.log('📝 Adding discount columns to payments table...');
+        await this.db.execAsync(`
+          ALTER TABLE payments ADD COLUMN discount_type TEXT CHECK(discount_type IN ('$', '%'));
+          ALTER TABLE payments ADD COLUMN discount_amount REAL CHECK(discount_amount >= 0);
+        `);
+        console.log('✅ Discount columns added to payments table');
+      }
+    } catch (error) {
+      console.log('No payments discount migration needed');
+    }
   }
 
   private async createTables(): Promise<void> {
@@ -351,6 +387,8 @@ class DatabaseService {
         address TEXT,
         emergency_contact TEXT,
         notes TEXT,
+        discount_type TEXT CHECK(discount_type IN ('$', '%')),
+        discount_amount REAL CHECK(discount_amount >= 0),
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
@@ -402,6 +440,8 @@ class DatabaseService {
         transaction_ref TEXT,
         status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('pending', 'completed', 'failed', 'refunded')),
         notes TEXT,
+        discount_type TEXT CHECK(discount_type IN ('$', '%')),
+        discount_amount REAL CHECK(discount_amount >= 0),
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         sync_status TEXT NOT NULL DEFAULT 'pending' CHECK(sync_status IN ('pending', 'synced')),
@@ -687,10 +727,11 @@ class DatabaseService {
   async createMember(input: CreateMemberInput): Promise<Member> {
     const db = await this.getDatabase();
     const result = await db.runAsync(
-      `INSERT INTO members (first_name, last_name, phone, email, instagram, address, emergency_contact, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO members (first_name, last_name, phone, email, instagram, address, emergency_contact, notes, discount_type, discount_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [input.first_name, input.last_name, input.phone || null, input.email || null,
-       input.instagram || null, input.address || null, input.emergency_contact || null, input.notes || null]
+       input.instagram || null, input.address || null, input.emergency_contact || null, input.notes || null,
+       input.discount_type || null, input.discount_amount || null]
     );
     
     const member = await db.getFirstAsync<Member>(
@@ -760,6 +801,14 @@ class DatabaseService {
     if (input.notes !== undefined) {
       fields.push('notes = ?');
       values.push(input.notes || null);
+    }
+    if (input.discount_type !== undefined) {
+      fields.push('discount_type = ?');
+      values.push(input.discount_type || null);
+    }
+    if (input.discount_amount !== undefined) {
+      fields.push('discount_amount = ?');
+      values.push(input.discount_amount || null);
     }
 
     if (fields.length === 0) {
@@ -1046,11 +1095,11 @@ class DatabaseService {
   async createPayment(input: CreatePaymentInput): Promise<Payment> {
     const db = await this.getDatabase();
     const result = await db.runAsync(
-      `INSERT INTO payments (member_id, subscription_id, amount, payment_date, payment_method, transaction_ref, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO payments (member_id, subscription_id, amount, payment_date, payment_method, transaction_ref, status, notes, discount_type, discount_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [input.member_id, input.subscription_id || null, input.amount, input.payment_date,
        input.payment_method, input.transaction_ref || null, input.status || 'completed',
-       input.notes || null]
+       input.notes || null, input.discount_type || null, input.discount_amount || null]
     );
     
     const payment = await db.getFirstAsync<Payment>(
